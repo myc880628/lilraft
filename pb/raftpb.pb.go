@@ -10,6 +10,7 @@ It is generated from these files:
 
 It has these top-level messages:
 	LogEntry
+	AppendEntriesRequest
 */
 package protobuf
 
@@ -56,6 +57,54 @@ func (m *LogEntry) GetCommandName() string {
 func (m *LogEntry) GetCommand() []byte {
 	if m != nil {
 		return m.Command
+	}
+	return nil
+}
+
+type AppendEntriesRequest struct {
+	Term             *uint64     `protobuf:"varint,1,req" json:"Term,omitempty"`
+	PrevLogIndex     *uint64     `protobuf:"varint,2,req" json:"PrevLogIndex,omitempty"`
+	PrevLogTerm      *uint64     `protobuf:"varint,3,req" json:"PrevLogTerm,omitempty"`
+	CommitIndex      *uint64     `protobuf:"varint,4,req" json:"CommitIndex,omitempty"`
+	Entries          []*LogEntry `protobuf:"bytes,6,rep" json:"Entries,omitempty"`
+	XXX_unrecognized []byte      `json:"-"`
+}
+
+func (m *AppendEntriesRequest) Reset()         { *m = AppendEntriesRequest{} }
+func (m *AppendEntriesRequest) String() string { return proto.CompactTextString(m) }
+func (*AppendEntriesRequest) ProtoMessage()    {}
+
+func (m *AppendEntriesRequest) GetTerm() uint64 {
+	if m != nil && m.Term != nil {
+		return *m.Term
+	}
+	return 0
+}
+
+func (m *AppendEntriesRequest) GetPrevLogIndex() uint64 {
+	if m != nil && m.PrevLogIndex != nil {
+		return *m.PrevLogIndex
+	}
+	return 0
+}
+
+func (m *AppendEntriesRequest) GetPrevLogTerm() uint64 {
+	if m != nil && m.PrevLogTerm != nil {
+		return *m.PrevLogTerm
+	}
+	return 0
+}
+
+func (m *AppendEntriesRequest) GetCommitIndex() uint64 {
+	if m != nil && m.CommitIndex != nil {
+		return *m.CommitIndex
+	}
+	return 0
+}
+
+func (m *AppendEntriesRequest) GetEntries() []*LogEntry {
+	if m != nil {
+		return m.Entries
 	}
 	return nil
 }
