@@ -1,9 +1,15 @@
 package lilraft
 
-import "net/url"
+import (
+	"net/url"
+
+	"github.com/lilwulin/lilraft/protobuf"
+)
 
 type Node interface {
-	rpcAppendEntries()
+	// TODO: Add response
+	rpcAppendEntries(protobuf.AppendEntriesRequest) protobuf.AppendEntriesResponse
+	rpcRequestVote(protobuf.RequestVoteRequest) protobuf.RequestVoteResponse
 }
 
 type HttpNode struct {
