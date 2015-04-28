@@ -1,2 +1,2 @@
-##lilraft - a raft implementation in Go
+#lilraft - a raft implementation in Go
 Not implemented yet.
