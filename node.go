@@ -16,8 +16,10 @@ type Node interface {
 //  for server to send rpc to remote machine.
 type nodeMap map[uint32]*Node
 
-func (nmap *nodeMap) requestVotes() {
-
+func (nmap *nodeMap) requestVotes(lastIndex uint32, candaiteTerm uint32) {
+	for _, node := range nodeMap {
+		//TODO: send request vote parallel
+	}
 }
 
 type httpNode struct {

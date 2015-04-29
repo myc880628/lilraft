@@ -14,6 +14,10 @@ func newLog() *Log {
 	}
 }
 
+func (log *Log) lastLogIndex() uint32 {
+	return len(log.entries) - 1
+}
+
 // LogEntry is the entry in log, it wraps the LogEntry in raftpb.proto
 type LogEntry struct {
 	*protobuf.LogEntry

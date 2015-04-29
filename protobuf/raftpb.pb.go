@@ -25,8 +25,8 @@ var _ = proto.Marshal
 var _ = math.Inf
 
 type LogEntry struct {
-	Index            *uint64 `protobuf:"varint,1,req" json:"Index,omitempty"`
-	Term             *uint64 `protobuf:"varint,2,req" json:"Term,omitempty"`
+	Index            *uint32 `protobuf:"varint,1,req" json:"Index,omitempty"`
+	Term             *uint32 `protobuf:"varint,2,req" json:"Term,omitempty"`
 	CommandName      *string `protobuf:"bytes,3,req" json:"CommandName,omitempty"`
 	Command          []byte  `protobuf:"bytes,4,opt" json:"Command,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
@@ -36,14 +36,14 @@ func (m *LogEntry) Reset()         { *m = LogEntry{} }
 func (m *LogEntry) String() string { return proto.CompactTextString(m) }
 func (*LogEntry) ProtoMessage()    {}
 
-func (m *LogEntry) GetIndex() uint64 {
+func (m *LogEntry) GetIndex() uint32 {
 	if m != nil && m.Index != nil {
 		return *m.Index
 	}
 	return 0
 }
 
-func (m *LogEntry) GetTerm() uint64 {
+func (m *LogEntry) GetTerm() uint32 {
 	if m != nil && m.Term != nil {
 		return *m.Term
 	}
@@ -65,11 +65,11 @@ func (m *LogEntry) GetCommand() []byte {
 }
 
 type AppendEntriesRequest struct {
-	LeaderID         *uint64     `protobuf:"varint,1,req" json:"LeaderID,omitempty"`
-	Term             *uint64     `protobuf:"varint,2,req" json:"Term,omitempty"`
-	PrevLogIndex     *uint64     `protobuf:"varint,3,req" json:"PrevLogIndex,omitempty"`
-	PrevLogTerm      *uint64     `protobuf:"varint,4,req" json:"PrevLogTerm,omitempty"`
-	CommitIndex      *uint64     `protobuf:"varint,5,req" json:"CommitIndex,omitempty"`
+	LeaderID         *uint32     `protobuf:"varint,1,req" json:"LeaderID,omitempty"`
+	Term             *uint32     `protobuf:"varint,2,req" json:"Term,omitempty"`
+	PrevLogIndex     *uint32     `protobuf:"varint,3,req" json:"PrevLogIndex,omitempty"`
+	PrevLogTerm      *uint32     `protobuf:"varint,4,req" json:"PrevLogTerm,omitempty"`
+	CommitIndex      *uint32     `protobuf:"varint,5,req" json:"CommitIndex,omitempty"`
 	Entries          []*LogEntry `protobuf:"bytes,6,rep" json:"Entries,omitempty"`
 	XXX_unrecognized []byte      `json:"-"`
 }
@@ -78,35 +78,35 @@ func (m *AppendEntriesRequest) Reset()         { *m = AppendEntriesRequest{} }
 func (m *AppendEntriesRequest) String() string { return proto.CompactTextString(m) }
 func (*AppendEntriesRequest) ProtoMessage()    {}
 
-func (m *AppendEntriesRequest) GetLeaderID() uint64 {
+func (m *AppendEntriesRequest) GetLeaderID() uint32 {
 	if m != nil && m.LeaderID != nil {
 		return *m.LeaderID
 	}
 	return 0
 }
 
-func (m *AppendEntriesRequest) GetTerm() uint64 {
+func (m *AppendEntriesRequest) GetTerm() uint32 {
 	if m != nil && m.Term != nil {
 		return *m.Term
 	}
 	return 0
 }
 
-func (m *AppendEntriesRequest) GetPrevLogIndex() uint64 {
+func (m *AppendEntriesRequest) GetPrevLogIndex() uint32 {
 	if m != nil && m.PrevLogIndex != nil {
 		return *m.PrevLogIndex
 	}
 	return 0
 }
 
-func (m *AppendEntriesRequest) GetPrevLogTerm() uint64 {
+func (m *AppendEntriesRequest) GetPrevLogTerm() uint32 {
 	if m != nil && m.PrevLogTerm != nil {
 		return *m.PrevLogTerm
 	}
 	return 0
 }
 
-func (m *AppendEntriesRequest) GetCommitIndex() uint64 {
+func (m *AppendEntriesRequest) GetCommitIndex() uint32 {
 	if m != nil && m.CommitIndex != nil {
 		return *m.CommitIndex
 	}
@@ -121,7 +121,7 @@ func (m *AppendEntriesRequest) GetEntries() []*LogEntry {
 }
 
 type AppendEntriesResponse struct {
-	Term             *uint64 `protobuf:"varint,1,req" json:"Term,omitempty"`
+	Term             *uint32 `protobuf:"varint,1,req" json:"Term,omitempty"`
 	Success          *bool   `protobuf:"varint,2,req" json:"Success,omitempty"`
 	Reason           *string `protobuf:"bytes,3,req" json:"Reason,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
@@ -131,7 +131,7 @@ func (m *AppendEntriesResponse) Reset()         { *m = AppendEntriesResponse{} }
 func (m *AppendEntriesResponse) String() string { return proto.CompactTextString(m) }
 func (*AppendEntriesResponse) ProtoMessage()    {}
 
-func (m *AppendEntriesResponse) GetTerm() uint64 {
+func (m *AppendEntriesResponse) GetTerm() uint32 {
 	if m != nil && m.Term != nil {
 		return *m.Term
 	}
@@ -153,10 +153,10 @@ func (m *AppendEntriesResponse) GetReason() string {
 }
 
 type RequestVoteRequest struct {
-	CandidateID      *uint64 `protobuf:"varint,1,req" json:"CandidateID,omitempty"`
-	Term             *uint64 `protobuf:"varint,2,req" json:"Term,omitempty"`
-	LastLogIndex     *uint64 `protobuf:"varint,3,req" json:"LastLogIndex,omitempty"`
-	LastLogTerm      *uint64 `protobuf:"varint,4,req" json:"LastLogTerm,omitempty"`
+	CandidateID      *uint32 `protobuf:"varint,1,req" json:"CandidateID,omitempty"`
+	Term             *uint32 `protobuf:"varint,2,req" json:"Term,omitempty"`
+	LastLogIndex     *uint32 `protobuf:"varint,3,req" json:"LastLogIndex,omitempty"`
+	LastLogTerm      *uint32 `protobuf:"varint,4,req" json:"LastLogTerm,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -164,28 +164,28 @@ func (m *RequestVoteRequest) Reset()         { *m = RequestVoteRequest{} }
 func (m *RequestVoteRequest) String() string { return proto.CompactTextString(m) }
 func (*RequestVoteRequest) ProtoMessage()    {}
 
-func (m *RequestVoteRequest) GetCandidateID() uint64 {
+func (m *RequestVoteRequest) GetCandidateID() uint32 {
 	if m != nil && m.CandidateID != nil {
 		return *m.CandidateID
 	}
 	return 0
 }
 
-func (m *RequestVoteRequest) GetTerm() uint64 {
+func (m *RequestVoteRequest) GetTerm() uint32 {
 	if m != nil && m.Term != nil {
 		return *m.Term
 	}
 	return 0
 }
 
-func (m *RequestVoteRequest) GetLastLogIndex() uint64 {
+func (m *RequestVoteRequest) GetLastLogIndex() uint32 {
 	if m != nil && m.LastLogIndex != nil {
 		return *m.LastLogIndex
 	}
 	return 0
 }
 
-func (m *RequestVoteRequest) GetLastLogTerm() uint64 {
+func (m *RequestVoteRequest) GetLastLogTerm() uint32 {
 	if m != nil && m.LastLogTerm != nil {
 		return *m.LastLogTerm
 	}
@@ -193,7 +193,7 @@ func (m *RequestVoteRequest) GetLastLogTerm() uint64 {
 }
 
 type RequestVoteResponse struct {
-	Term             *uint64 `protobuf:"varint,1,req" json:"Term,omitempty"`
+	Term             *uint32 `protobuf:"varint,1,req" json:"Term,omitempty"`
 	VoteGranted      *bool   `protobuf:"varint,2,req" json:"VoteGranted,omitempty"`
 	Reason           *string `protobuf:"bytes,3,req" json:"Reason,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
@@ -203,7 +203,7 @@ func (m *RequestVoteResponse) Reset()         { *m = RequestVoteResponse{} }
 func (m *RequestVoteResponse) String() string { return proto.CompactTextString(m) }
 func (*RequestVoteResponse) ProtoMessage()    {}
 
-func (m *RequestVoteResponse) GetTerm() uint64 {
+func (m *RequestVoteResponse) GetTerm() uint32 {
 	if m != nil && m.Term != nil {
 		return *m.Term
 	}
