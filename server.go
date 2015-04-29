@@ -2,8 +2,12 @@ package lilraft
 
 import (
 	"math/rand"
+	"net/http"
 	"sync"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/lilwulin/lilraft/protobuf"
 )
 
 // state constant
@@ -17,8 +21,8 @@ const (
 const noleader = 0
 
 var (
-	minTimeout uint32 = 150            // minimum timeout: 150 ms
-	maxTimeout        = minTimeout * 2 //maximum timeout: 300ms
+	minTimeout = 150            // minimum timeout: 150 ms
+	maxTimeout = minTimeout * 2 //maximum timeout: 300ms
 	// electionTimeout
 )
 
@@ -47,8 +51,10 @@ type Server struct {
 	currentTerm  uint32
 	context      interface{}
 	electionTick <-chan time.Time
-	nodemap      *nodeMap
+	nodemap      nodeMap
 	log          *Log
+	httpClient   http.Client
+	votes        uint32
 	*mutexState
 }
 
@@ -63,21 +69,22 @@ func resetElectionTimeout(s *Server) {
 
 // NewServer can return a new server for clients
 func NewServer(id uint32, context interface{}) (s *Server) {
-	if id == nil {
-		panic("lilraft: id is required")
-	}
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
-	s := &Server{
-		id:          id,
-		leader:      noleader,
-		context:     context,
-		mutexState:  follower,
+	s = &Server{
+		id:      id,
+		leader:  noleader,
+		context: context,
+		// mutexState:  follower,
 		nodemap:     make(nodeMap),
 		currentTerm: 0,
 		log:         newLog(),
+		votes:       0,
 	}
+	s.mutexState.setState(follower)
+	// http.Client can cache TCP connections
+	s.httpClient.Transport = &http.Transport{DisableKeepAlives: false}
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
 	resetElectionTimeout(s)
 	return
@@ -124,13 +131,37 @@ func (s *Server) candidateloop() {
 	electionTimeoutTick := time.NewTicker(randomElectionTimeout()).C
 	for s.getState() == candidate {
 		// TODO: add send requestVote parallel
-		s.nodemap.requestVotes(s.log.lastLogIndex(), s.currentTerm)
+		if err := s.requestVotes(); err != nil {
+
+		}
 		select {
 		case <-electionTimeoutTick:
 			// Candidate reset timeout and start a new election
 			electionTimeoutTick = time.NewTicker(randomElectionTimeout()).C
 		}
 	}
+}
+
+func (s *Server) requestVotes() (err error) {
+	voteCountChan := make(chan uint32, len(s.nodemap))
+	for _, node := range s.nodemap {
+		go func() {
+			pb := &protobuf.RequestVoteRequest{
+				CandidateID:  proto.Uint32(s.id),
+				Term:         proto.Uint32(s.currentTerm),
+				LastLogIndex: proto.Uint32(s.log.lastLogIndex()),
+			}
+			responseProto, e := (*node).rpcRequestVote(s, pb)
+			if e != nil {
+				err = e
+			}
+			if responseProto.GetVoteGranted() {
+				voteCountChan <- 1
+			}
+		}()
+	}
+	s.votes += <-voteCountChan
+	return err
 }
 
 // TODO: fill this.

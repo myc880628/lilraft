@@ -26,7 +26,6 @@ message RequestVoteRequest {
         required uint32 CandidateID=1;
         required uint32 Term=2;
         required uint32 LastLogIndex=3;
-        required uint32 LastLogTerm=4;
 }
 
 message RequestVoteResponse {

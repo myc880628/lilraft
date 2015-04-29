@@ -156,7 +156,6 @@ type RequestVoteRequest struct {
 	CandidateID      *uint32 `protobuf:"varint,1,req" json:"CandidateID,omitempty"`
 	Term             *uint32 `protobuf:"varint,2,req" json:"Term,omitempty"`
 	LastLogIndex     *uint32 `protobuf:"varint,3,req" json:"LastLogIndex,omitempty"`
-	LastLogTerm      *uint32 `protobuf:"varint,4,req" json:"LastLogTerm,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -181,13 +180,6 @@ func (m *RequestVoteRequest) GetTerm() uint32 {
 func (m *RequestVoteRequest) GetLastLogIndex() uint32 {
 	if m != nil && m.LastLogIndex != nil {
 		return *m.LastLogIndex
-	}
-	return 0
-}
-
-func (m *RequestVoteRequest) GetLastLogTerm() uint32 {
-	if m != nil && m.LastLogTerm != nil {
-		return *m.LastLogTerm
 	}
 	return 0
 }

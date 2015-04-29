@@ -13,10 +13,10 @@ const (
 	setConfigPath     = "lilraft/setconfig"
 )
 
-// RunHTTPTransport accept a server and http multiplexer to handle other peers'
+// SetHTTPTransport accept a http multiplexer to handle other peers'
 // RPCs like RequestVote and AppendEntry, etc.
-// Run this before running NewServer.
-func (s *Server) RunHTTPTransport(mux *http.ServeMux) {
+// Run this before running server.Start().
+func (s *Server) SetHTTPTransport(mux *http.ServeMux) {
 	mux.HandleFunc(idPath, idHandleFunc(s))
 	mux.HandleFunc(appendEntriesPath, appendEntriesHandleFunc(s))
 	mux.HandleFunc(requestVotePath, requestVoteHandleFunc(s))
