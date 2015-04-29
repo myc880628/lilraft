@@ -47,7 +47,8 @@ type Server struct {
 	currentTerm  uint32
 	context      interface{}
 	electionTick <-chan time.Time
-	nodes        *nodeMap
+	nodemap      *nodeMap
+	log          *log
 	*mutexState
 }
 
@@ -73,7 +74,7 @@ func NewServer(id uint32, context interface{}) (s *Server) {
 		leader:      noleader,
 		context:     context,
 		mutexState:  follower,
-		nodes:       make(nodeMap),
+		nodemap:     make(nodeMap),
 		currentTerm: 0,
 	}
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
@@ -121,6 +122,7 @@ func (s *Server) candidateloop() {
 	s.currentTerm++ // enter candidate state. Server increments its term
 	electionTimeoutTick := time.NewTicker(randomElectionTimeout()).C
 	for s.getState() == candidate {
+		// TODO: add send requestVote parallel
 		select {
 		case <-electionTimeoutTick:
 			// Candidate reset timeout and start a new election
