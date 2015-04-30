@@ -33,6 +33,12 @@ type mutexState struct {
 	sync.RWMutex
 }
 
+// vote is passed through the server's voteChan
+type vote struct {
+	id      uint32
+	granted bool
+}
+
 func (mstate *mutexState) getState() uint8 {
 	mstate.RLock()
 	defer mstate.RUnlock()
@@ -57,7 +63,7 @@ type Server struct {
 	httpClient      http.Client
 	votes           uint32
 	votefor         uint32
-	voteCountChan   chan uint32
+	voteChan        chan *vote
 	config          *configuration
 	*mutexState
 }
@@ -138,17 +144,17 @@ func (s *Server) candidateloop() {
 	s.leader = noleader
 	s.currentTerm++ // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
-	s.votes = 1 // candidate vote for himself
+	s.votes = 1 // candidate vote for itself
+	nodeVote := make(map[uint32]bool)
 	s.requestVotes()
 	for s.getState() == candidate {
 		select {
 		case <-s.electionTimeout.C:
-			// Candidate reset timeout and start a new election
-			s.resetElectionTimeout()
-			s.votes = 1 // candidate vote for himself
-			s.requestVotes()
-		case <-s.voteCountChan:
-			s.votes += 1
+			// Candidate start a new election
+			return
+		case v := <-s.voteChan:
+			nodeVote[v.id] = v.granted
+			// TODO: add more operation
 		}
 	}
 }
@@ -159,21 +165,33 @@ func (s *Server) leaderloop() {
 }
 
 func (s *Server) requestVotes() {
-	// if re-relect, reset the voteCountChan
-	s.voteCountChan = make(chan uint32, 5)
-	for _, node := range s.nodemap {
+	// if re-relect, reset the voteChan
+	s.voteChan = make(chan *vote, 10)
+	for id, node := range s.config.allNodes() {
+		responded := false
 		go func() {
-			pb := &protobuf.RequestVoteRequest{
-				CandidateID:  proto.Uint32(s.id),
-				Term:         proto.Uint32(s.currentTerm),
-				LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
-			}
-			responseProto, err := (*node).rpcRequestVote(s, pb)
-			if err != nil {
-				fmt.Println(err.Error())
-			}
-			if responseProto.GetVoteGranted() {
-				s.voteCountChan <- 1
+			for !responded { // not responded, keep trying
+				if id == s.id { // if it's the candidiate itself
+					return
+				}
+				pb := &protobuf.RequestVoteRequest{
+					CandidateID:  proto.Uint32(s.id),
+					Term:         proto.Uint32(s.currentTerm),
+					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
+				}
+				responseProto, err := (*node).rpcRequestVote(s, pb)
+				if err != nil {
+					fmt.Println(err.Error())
+					responded = false
+					// does not timeout and try to send request over and over agian
+					s.resetElectionTimeout()
+					continue
+				}
+				responded = true
+				s.voteChan <- &vote{
+					id:      id,
+					granted: responseProto.GetVoteGranted(),
+				}
 			}
 		}()
 	}

@@ -12,6 +12,7 @@ import (
 
 // Node represent the remote machine ndoe
 type Node interface {
+	id() uint32
 	rpcAppendEntries(*protobuf.AppendEntriesRequest) *protobuf.AppendEntriesResponse
 	rpcRequestVote(*Server, *protobuf.RequestVoteRequest) (*protobuf.RequestVoteResponse, error)
 }
@@ -21,7 +22,12 @@ type Node interface {
 type nodeMap map[uint32]*Node
 
 type httpNode struct {
-	url *url.URL
+	remoteId uint32
+	url      *url.URL
+}
+
+func (node *httpNode) id() uint32 {
+	return node.remoteId
 }
 
 func (node *httpNode) rpcRequestVote(server *Server, rvr *protobuf.RequestVoteRequest) (*protobuf.RequestVoteResponse, error) {
