@@ -50,3 +50,8 @@ func (node *httpNode) rpcRequestVote(server *Server, rvr *protobuf.RequestVoteRe
 	}
 	return responseProto, nil
 }
+
+// TODO: fill this
+func (node *httpNode) rpcAppendEntries(aer *protobuf.AppendEntriesRequest) *protobuf.AppendEntriesResponse {
+	return nil
+}

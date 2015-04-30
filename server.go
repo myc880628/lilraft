@@ -1,6 +1,7 @@
 package lilraft
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
 	"sync"
@@ -46,15 +47,18 @@ func (mstate *mutexState) setState(stateInt uint8) {
 
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
-	id           uint32
-	leader       uint32
-	currentTerm  uint32
-	context      interface{}
-	electionTick <-chan time.Time
-	nodemap      nodeMap
-	log          *Log
-	httpClient   http.Client
-	votes        uint32
+	id              uint32
+	leader          uint32
+	currentTerm     uint32
+	context         interface{}
+	electionTimeout *time.Timer
+	nodemap         nodeMap
+	log             *Log
+	httpClient      http.Client
+	votes           uint32
+	votefor         uint32
+	voteCountChan   chan uint32
+	config          *configuration
 	*mutexState
 }
 
@@ -63,14 +67,17 @@ func randomElectionTimeout() time.Duration {
 	return time.Duration(d) * time.Millisecond
 }
 
-func resetElectionTimeout(s *Server) {
-	s.electionTick = time.NewTicker(randomElectionTimeout()).C
+func (s *Server) resetElectionTimeout() {
+	s.electionTimeout = time.NewTimer(randomElectionTimeout())
 }
 
 // NewServer can return a new server for clients
 func NewServer(id uint32, context interface{}) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
+	}
+	if id == 0 { // HINT: id可以在之后作为投票的标记
+		panic("id must be > 0")
 	}
 	s = &Server{
 		id:      id,
@@ -81,12 +88,14 @@ func NewServer(id uint32, context interface{}) (s *Server) {
 		currentTerm: 0,
 		log:         newLog(),
 		votes:       0,
+		votefor:     0,
+		// voteCountChan: make(chan uint32, 5),
 	}
 	s.mutexState.setState(follower)
 	// http.Client can cache TCP connections
 	s.httpClient.Transport = &http.Transport{DisableKeepAlives: false}
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
-	resetElectionTimeout(s)
+	s.resetElectionTimeout()
 	return
 }
 
@@ -116,7 +125,7 @@ func (s *Server) loop() {
 func (s *Server) followerloop() {
 	for s.getState() == follower {
 		select {
-		case <-s.electionTick:
+		case <-s.electionTimeout.C:
 			s.setState(candidate)
 			return
 			// case <-
@@ -128,43 +137,44 @@ func (s *Server) followerloop() {
 func (s *Server) candidateloop() {
 	s.leader = noleader
 	s.currentTerm++ // enter candidate state. Server increments its term
-	electionTimeoutTick := time.NewTicker(randomElectionTimeout()).C
+	s.resetElectionTimeout()
+	s.votes = 1 // candidate vote for himself
+	s.requestVotes()
 	for s.getState() == candidate {
-		// TODO: add send requestVote parallel
-		if err := s.requestVotes(); err != nil {
-
-		}
 		select {
-		case <-electionTimeoutTick:
+		case <-s.electionTimeout.C:
 			// Candidate reset timeout and start a new election
-			electionTimeoutTick = time.NewTicker(randomElectionTimeout()).C
+			s.resetElectionTimeout()
+			s.votes = 1 // candidate vote for himself
+			s.requestVotes()
+		case <-s.voteCountChan:
+			s.votes += 1
 		}
 	}
-}
-
-func (s *Server) requestVotes() (err error) {
-	voteCountChan := make(chan uint32, len(s.nodemap))
-	for _, node := range s.nodemap {
-		go func() {
-			pb := &protobuf.RequestVoteRequest{
-				CandidateID:  proto.Uint32(s.id),
-				Term:         proto.Uint32(s.currentTerm),
-				LastLogIndex: proto.Uint32(s.log.lastLogIndex()),
-			}
-			responseProto, e := (*node).rpcRequestVote(s, pb)
-			if e != nil {
-				err = e
-			}
-			if responseProto.GetVoteGranted() {
-				voteCountChan <- 1
-			}
-		}()
-	}
-	s.votes += <-voteCountChan
-	return err
 }
 
 // TODO: fill this.
 func (s *Server) leaderloop() {
 
+}
+
+func (s *Server) requestVotes() {
+	// if re-relect, reset the voteCountChan
+	s.voteCountChan = make(chan uint32, 5)
+	for _, node := range s.nodemap {
+		go func() {
+			pb := &protobuf.RequestVoteRequest{
+				CandidateID:  proto.Uint32(s.id),
+				Term:         proto.Uint32(s.currentTerm),
+				LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
+			}
+			responseProto, err := (*node).rpcRequestVote(s, pb)
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			if responseProto.GetVoteGranted() {
+				s.voteCountChan <- 1
+			}
+		}()
+	}
 }

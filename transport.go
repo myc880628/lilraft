@@ -24,35 +24,35 @@ func (s *Server) SetHTTPTransport(mux *http.ServeMux) {
 	mux.HandleFunc(setConfigPath, setConfigHandleFunc(s))
 }
 
-func idHandleFunc(s *server) http.HandleFunc {
+func idHandleFunc(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(fmt.Sprint(s.id)))
 	}
 }
 
 // TODO: fill this func
-func appendEntriesHandleFunc(s *server) http.HandlerFunc {
+func appendEntriesHandleFunc(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
 }
 
 // TODO: fill this func
-func requestVoteHandleFunc(s *server) http.HandleFunc {
+func requestVoteHandleFunc(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
 }
 
 // TODO: fill this func
-func commandHandleFunc(s *server) http.HandleFunc {
+func commandHandleFunc(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
 }
 
 // TODO: fill this func
-func setConfigHandleFunc(s *server) http.HandleFunc {
+func setConfigHandleFunc(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}

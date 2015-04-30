@@ -155,7 +155,7 @@ func (m *AppendEntriesResponse) GetReason() string {
 type RequestVoteRequest struct {
 	CandidateID      *uint32 `protobuf:"varint,1,req" json:"CandidateID,omitempty"`
 	Term             *uint32 `protobuf:"varint,2,req" json:"Term,omitempty"`
-	LastLogIndex     *uint32 `protobuf:"varint,3,req" json:"LastLogIndex,omitempty"`
+	LastLogIndex     *uint64 `protobuf:"varint,3,req" json:"LastLogIndex,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -177,7 +177,7 @@ func (m *RequestVoteRequest) GetTerm() uint32 {
 	return 0
 }
 
-func (m *RequestVoteRequest) GetLastLogIndex() uint32 {
+func (m *RequestVoteRequest) GetLastLogIndex() uint64 {
 	if m != nil && m.LastLogIndex != nil {
 		return *m.LastLogIndex
 	}
