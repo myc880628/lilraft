@@ -1,5 +1,6 @@
 package lilraft
 
+// commandType stores client's command reference
 var commandType map[string]Command
 
 // Command is a interface for client to implement and send to server

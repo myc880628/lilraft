@@ -20,6 +20,7 @@ const (
 )
 
 const noleader = 0
+const notVotedYet = 0
 
 var (
 	minTimeout = 150            // minimum timeout: 150 ms
@@ -53,19 +54,25 @@ func (mstate *mutexState) setState(stateInt uint8) {
 
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
-	id              uint32
-	leader          uint32
-	currentTerm     uint32
-	context         interface{}
-	electionTimeout *time.Timer
-	nodemap         nodeMap
-	log             *Log
-	httpClient      http.Client
-	votes           uint32
-	votefor         uint32
-	voteChan        chan *vote
-	config          *configuration
+	id               uint32
+	leader           uint32
+	currentTerm      uint32
+	context          interface{}
+	electionTimeout  *time.Timer
+	nodemap          nodeMap
+	log              *Log
+	httpClient       http.Client
+	votefor          uint32
+	voteChan         chan *vote
+	config           *configuration
+	nodesVoteGranted map[uint32]bool
+	commandChan      chan wrappedCommand
 	*mutexState
+}
+
+type wrappedCommand struct {
+	command Command
+	errChan chan error
 }
 
 func randomElectionTimeout() time.Duration {
@@ -93,13 +100,14 @@ func NewServer(id uint32, context interface{}) (s *Server) {
 		nodemap:     make(nodeMap),
 		currentTerm: 0,
 		log:         newLog(),
-		votes:       0,
 		votefor:     0,
 		// voteCountChan: make(chan uint32, 5),
+		commandChan: make(chan wrappedCommand),
 	}
-	s.mutexState.setState(follower)
+	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
 	s.httpClient.Transport = &http.Transport{DisableKeepAlives: false}
+	s.httpClient.Timeout = time.Duration(minTimeout/2) * time.Millisecond
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
 	s.resetElectionTimeout()
 	return
@@ -107,6 +115,7 @@ func NewServer(id uint32, context interface{}) (s *Server) {
 
 // Start starts a server, remember to call NewServer before call this.
 func (s *Server) Start() {
+	s.setState(follower)
 	go s.loop()
 }
 
@@ -144,32 +153,71 @@ func (s *Server) candidateloop() {
 	s.leader = noleader
 	s.currentTerm++ // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
-	s.votes = 1 // candidate vote for itself
-	nodeVote := make(map[uint32]bool)
+	s.nodesVoteGranted = make(map[uint32]bool)
+	s.voteForItself()
 	s.requestVotes()
+	if s.electionPass() {
+		// TODO: Add more operation
+		s.setState(leader)
+		s.votefor = notVotedYet
+		return
+	}
 	for s.getState() == candidate {
 		select {
 		case <-s.electionTimeout.C:
 			// Candidate start a new election
 			return
-		case v := <-s.voteChan:
-			nodeVote[v.id] = v.granted
-			// TODO: add more operation
 		}
 	}
 }
 
 // TODO: fill this.
 func (s *Server) leaderloop() {
+	for s.getState() == leader {
+		select {
+		// case wrappedCommand := <-s.commandChan:
+		// 	newEntry := newLogEntry()
+		}
 
+	}
+}
+
+// Exec executes client's command. client should
+// use concrete commands that implement Command interface
+func (s *Server) Exec(command Command) error {
+	errChan := make(chan error)
+	s.commandChan <- wrappedCommand{
+		errChan: errChan,
+		command: command,
+	}
+	return <-errChan
+}
+
+// RegisterCommand registers client's commands that
+// implement Command interface. Only registered commands
+// can be decoded and executed by other nodes.
+// TODO: fill this
+func (s *Server) RegisterCommand(command Command) {
+	if command == nil {
+		panic("lilraft: Command cannot be nil")
+	} else if commandType[command.Name()] != nil {
+		panic("lilraft: Command exists!")
+	}
+	commandType[command.Name()] = command
+}
+
+func (s *Server) voteForItself() {
+	s.votefor = s.id
+	s.nodesVoteGranted[s.id] = true
 }
 
 func (s *Server) requestVotes() {
 	// if re-relect, reset the voteChan
 	s.voteChan = make(chan *vote, 10)
-	for id, node := range s.config.allNodes() {
+	allNodes := s.config.allNodes()
+	for id, node := range allNodes {
 		responded := false
-		go func() {
+		go func() { // send vote request simultaneously
 			for !responded { // not responded, keep trying
 				if id == s.id { // if it's the candidiate itself
 					return
@@ -184,7 +232,6 @@ func (s *Server) requestVotes() {
 					fmt.Println(err.Error())
 					responded = false
 					// does not timeout and try to send request over and over agian
-					s.resetElectionTimeout()
 					continue
 				}
 				responded = true
@@ -195,4 +242,48 @@ func (s *Server) requestVotes() {
 			}
 		}()
 	}
+
+	for {
+		select {
+		case vote := <-s.voteChan:
+			s.nodesVoteGranted[vote.id] = vote.granted
+			if len(s.nodesVoteGranted) == len(allNodes) { // if all nodes have voted
+				return
+			}
+		}
+	}
+}
+
+func (s *Server) electionPass() bool {
+	if s.config.getState() == c_old {
+		votesCount := 0
+		for _, granted := range s.nodesVoteGranted {
+			if granted {
+				votesCount++
+			}
+		}
+		if votesCount >= len(s.nodesVoteGranted)/2+1 {
+			return true
+		}
+	} else if s.config.getState() == c_old_new { // candidate must be approved by Cold and Cold,new.
+		voteCountOld := 0
+		voteCountOldNew := 0
+		for id := range s.config.c_OldNode {
+			if s.nodesVoteGranted[id] == true {
+				voteCountOld++
+			}
+		}
+		for id := range s.config.c_NewNode {
+			if s.nodesVoteGranted[id] == true {
+				voteCountOldNew++
+			}
+		}
+		if voteCountOld >= len(s.config.c_OldNode)/2+1 &&
+			voteCountOldNew >= len(s.config.c_NewNode)/2+1 {
+			return true
+		}
+	} else {
+		panic("lilraft: config state unknown")
+	}
+	return false
 }
