@@ -54,20 +54,26 @@ func (mstate *mutexState) setState(stateInt uint8) {
 
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
+	//----from the paper------
+	currentTerm      uint64
+	votefor          uint32
+	log              *Log
+	commitIndex      uint64
+	lastAppliedIndex uint64
+	nextIndex        []uint64
+	matchIndex       []uint64
+	//------------------------
 	id               uint32
 	leader           uint32
-	currentTerm      uint32
 	context          interface{}
 	electionTimeout  *time.Timer
 	nodemap          nodeMap
-	log              *Log
 	httpClient       http.Client
-	votefor          uint32
 	voteChan         chan *vote
 	config           *configuration
 	nodesVoteGranted map[uint32]bool
 	commandChan      chan wrappedCommand
-	*mutexState
+	mutexState
 }
 
 type wrappedCommand struct {
@@ -85,12 +91,15 @@ func (s *Server) resetElectionTimeout() {
 }
 
 // NewServer can return a new server for clients
-func NewServer(id uint32, context interface{}) (s *Server) {
+func NewServer(id uint32, context interface{}, config *configuration) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
 	if id == 0 { // HINT: id可以在之后作为投票的标记
-		panic("id must be > 0")
+		panic("lilraft: id must be > 0")
+	}
+	if config == nil {
+		panic("lilraft: configuration unset")
 	}
 	s = &Server{
 		id:      id,
@@ -175,8 +184,13 @@ func (s *Server) candidateloop() {
 func (s *Server) leaderloop() {
 	for s.getState() == leader {
 		select {
-		// case wrappedCommand := <-s.commandChan:
-		// 	newEntry := newLogEntry()
+		case wrappedCommand := <-s.commandChan:
+			newEntry, err := s.log.newLogEntry(s.currentTerm, wrappedCommand.command)
+			if err != nil {
+				wrappedCommand.errChan <- err
+			}
+			s.log.appendEntry(newEntry)
+
 		}
 
 	}
@@ -224,7 +238,7 @@ func (s *Server) requestVotes() {
 				}
 				pb := &protobuf.RequestVoteRequest{
 					CandidateID:  proto.Uint32(s.id),
-					Term:         proto.Uint32(s.currentTerm),
+					Term:         proto.Uint64(s.currentTerm),
 					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
 				}
 				responseProto, err := (*node).rpcRequestVote(s, pb)
