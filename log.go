@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/lilwulin/lilraft/protobuf"
 )
 
 // Log is used as a way to ensure consensus
@@ -36,9 +35,6 @@ func (log *Log) appendEntry(logEtry *LogEntry) {
 }
 
 // LogEntry is the entry in log, it wraps the LogEntry in raftpb.proto
-type LogEntry struct {
-	*protobuf.LogEntry
-}
 
 func (log *Log) newLogEntry(term uint64, command Command) (*LogEntry, error) {
 	// TODO: add more arguments later
@@ -46,11 +42,11 @@ func (log *Log) newLogEntry(term uint64, command Command) (*LogEntry, error) {
 	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
 		return nil, err
 	}
-	pbEntry := protobuf.LogEntry{
+	pbEntry := &LogEntry{
 		Index:       proto.Uint64(log.lastLogIndex() + 1),
 		Term:        proto.Uint64(term),
 		CommandName: proto.String(command.Name()),
 		Command:     bytesBuffer.Bytes(),
 	}
-	return &LogEntry{&pbEntry}, nil
+	return pbEntry, nil
 }

@@ -7,14 +7,13 @@ import (
 	"net/url"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/lilwulin/lilraft/protobuf"
 )
 
 // Node represent the remote machine ndoe
 type Node interface {
 	id() uint32
-	rpcAppendEntries(*protobuf.AppendEntriesRequest) *protobuf.AppendEntriesResponse
-	rpcRequestVote(*Server, *protobuf.RequestVoteRequest) (*protobuf.RequestVoteResponse, error)
+	rpcAppendEntries(*AppendEntriesRequest) *AppendEntriesResponse
+	rpcRequestVote(*Server, *RequestVoteRequest) (*RequestVoteResponse, error)
 }
 
 // nodeMap wraps some useful function with a map
@@ -30,7 +29,7 @@ func (node *httpNode) id() uint32 {
 	return node.remoteId
 }
 
-func (node *httpNode) rpcRequestVote(server *Server, rvr *protobuf.RequestVoteRequest) (*protobuf.RequestVoteResponse, error) {
+func (node *httpNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*RequestVoteResponse, error) {
 	rvrbytes, err := proto.Marshal(rvr)
 	url := fmt.Sprintf("%s%s", node.url.String(), requestVotePath)
 	if err != nil {
@@ -50,7 +49,7 @@ func (node *httpNode) rpcRequestVote(server *Server, rvr *protobuf.RequestVoteRe
 	if err != nil {
 		return nil, err
 	}
-	responseProto := &protobuf.RequestVoteResponse{}
+	responseProto := &RequestVoteResponse{}
 	if err = proto.Unmarshal(reponseData, responseProto); err != nil {
 		return nil, err
 	}
@@ -58,6 +57,6 @@ func (node *httpNode) rpcRequestVote(server *Server, rvr *protobuf.RequestVoteRe
 }
 
 // TODO: fill this
-func (node *httpNode) rpcAppendEntries(aer *protobuf.AppendEntriesRequest) *protobuf.AppendEntriesResponse {
+func (node *httpNode) rpcAppendEntries(aer *AppendEntriesRequest) *AppendEntriesResponse {
 	return nil
 }

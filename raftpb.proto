@@ -1,4 +1,4 @@
-package protobuf;
+package lilraft;
 
 message LogEntry {
         required uint64 Index=1;

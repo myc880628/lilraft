@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/lilwulin/lilraft/protobuf"
 )
 
 // state constant
@@ -236,7 +235,7 @@ func (s *Server) requestVotes() {
 				if id == s.id { // if it's the candidiate itself
 					return
 				}
-				pb := &protobuf.RequestVoteRequest{
+				pb := &RequestVoteRequest{
 					CandidateID:  proto.Uint32(s.id),
 					Term:         proto.Uint64(s.currentTerm),
 					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),

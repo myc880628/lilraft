@@ -3,7 +3,7 @@
 // DO NOT EDIT!
 
 /*
-Package protobuf is a generated protocol buffer package.
+Package lilraft is a generated protocol buffer package.
 
 It is generated from these files:
 	raftpb.proto
@@ -15,7 +15,7 @@ It has these top-level messages:
 	RequestVoteRequest
 	RequestVoteResponse
 */
-package protobuf
+package lilraft
 
 import proto "github.com/golang/protobuf/proto"
 import math "math"
