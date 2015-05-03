@@ -225,10 +225,10 @@ func (s *Server) sendAppendEntries() {
 				pbAER := AppendEntriesRequest{
 					LeaderID:     proto.Uint32(s.id),
 					Term:         proto.Uint64(s.currentTerm),
-					PrevLogIndex: proto.Uint64(s.log.prevLogIndex),
-					PrevLogTerm:  proto.Uint64(s.log.prevLogTerm),
+					PrevLogIndex: proto.Uint64(s.log.prevLogIndex(s.nextIndex.get(id))),
+					PrevLogTerm:  proto.Uint64(s.log.prevLogTerm(s.nextIndex.get(id))),
 					CommitIndex:  proto.Uint64(s.log.commitIndex),
-					Entries:      s.log.entries[s.nextIndex.get(id):],
+					Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
 				}
 				reponse, err := node.rpcAppendEntries(s, &pbAER)
 				success = reponse.GetSuccess()
@@ -308,6 +308,7 @@ func (s *Server) requestVotes() {
 					CandidateID:  proto.Uint32(s.id),
 					Term:         proto.Uint64(s.currentTerm),
 					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
+					LastLogTerm:  proto.Uint64(s.log.lastLogTerm()),
 				}
 				responseProto, err := node.rpcRequestVote(s, pb)
 				if err != nil {
