@@ -51,6 +51,27 @@ func (mstate *mutexState) setState(stateInt uint8) {
 	mstate.Unlock()
 }
 
+type nextIndex struct {
+	m map[uint32]uint64
+	sync.RWMutex
+}
+
+func (ni *nextIndex) get(id uint32) uint64 {
+	ni.RLock()
+	defer ni.RUnlock()
+	if index, ok := ni.m[id]; !ok {
+		panic("lilraft: wrong peer in []NextIndex")
+	} else {
+		return index
+	}
+}
+
+func (ni *nextIndex) set(id uint32, index uint64) {
+	ni.Lock()
+	ni.m[id] = index
+	ni.Unlock()
+}
+
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
 	//----from the paper------
@@ -59,7 +80,7 @@ type Server struct {
 	log              *Log
 	commitIndex      uint64
 	lastAppliedIndex uint64
-	nextIndex        []uint64
+	nextIndex        nextIndex
 	matchIndex       []uint64
 	//------------------------
 	id               uint32
@@ -151,7 +172,6 @@ func (s *Server) followerloop() {
 		case <-s.electionTimeout.C:
 			s.setState(candidate)
 			return
-			// case <-
 		}
 	}
 }
@@ -189,14 +209,63 @@ func (s *Server) leaderloop() {
 				wrappedCommand.errChan <- err
 			}
 			s.log.appendEntry(newEntry)
-
+			s.sendAppendEntries()
 		}
-
 	}
 }
 
+// TODO: add more procedure
+func (s *Server) sendAppendEntries() {
+	theOtherNodes := s.theOtherNodes()
+	successChan := make(chan bool, len(theOtherNodes))
+	for id, node := range theOtherNodes {
+		go func() {
+			success := false
+			for !success {
+				pbAER := AppendEntriesRequest{
+					LeaderID:     proto.Uint32(s.id),
+					Term:         proto.Uint64(s.currentTerm),
+					PrevLogIndex: proto.Uint64(s.log.prevLogIndex),
+					PrevLogTerm:  proto.Uint64(s.log.prevLogTerm),
+					CommitIndex:  proto.Uint64(s.log.commitIndex),
+					Entries:      s.log.entries[s.nextIndex.get(id):],
+				}
+				reponse, err := node.rpcAppendEntries(s, &pbAER)
+				success = reponse.GetSuccess()
+				if err != nil || success != true {
+					//????????
+				}
+			}
+		}()
+	}
+	for {
+		select {
+		case <-successChan:
+		}
+	}
+}
+
+func (s *Server) theOtherNodes() nodeMap {
+	allNodeMap := make(nodeMap)
+	for id, node := range s.config.c_NewNode {
+		if id == s.id {
+			continue
+		}
+		allNodeMap[id] = node
+	}
+
+	for id, node := range s.config.c_OldNode {
+		if id == s.id {
+			continue
+		}
+		allNodeMap[id] = node
+	}
+	return allNodeMap
+}
+
 // Exec executes client's command. client should
-// use concrete commands that implement Command interface
+// use concrete and registered commands that
+// implement Command interface
 func (s *Server) Exec(command Command) error {
 	errChan := make(chan error)
 	s.commandChan <- wrappedCommand{
@@ -225,10 +294,10 @@ func (s *Server) voteForItself() {
 }
 
 func (s *Server) requestVotes() {
+	theOtherNodes := s.theOtherNodes()
 	// if re-relect, reset the voteChan
-	s.voteChan = make(chan *vote, 10)
-	allNodes := s.config.allNodes()
-	for id, node := range allNodes {
+	s.voteChan = make(chan *vote, len(theOtherNodes))
+	for id, node := range theOtherNodes {
 		responded := false
 		go func() { // send vote request simultaneously
 			for !responded { // not responded, keep trying
@@ -240,7 +309,7 @@ func (s *Server) requestVotes() {
 					Term:         proto.Uint64(s.currentTerm),
 					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
 				}
-				responseProto, err := (*node).rpcRequestVote(s, pb)
+				responseProto, err := node.rpcRequestVote(s, pb)
 				if err != nil {
 					fmt.Println(err.Error())
 					responded = false
@@ -260,7 +329,7 @@ func (s *Server) requestVotes() {
 		select {
 		case vote := <-s.voteChan:
 			s.nodesVoteGranted[vote.id] = vote.granted
-			if len(s.nodesVoteGranted) == len(allNodes) { // if all nodes have voted
+			if len(s.nodesVoteGranted) == len(theOtherNodes)+1 { // if all nodes including canndidate have voted
 				return
 			}
 		}

@@ -12,17 +12,17 @@ type configuration struct {
 	c_NewNode  nodeMap
 }
 
-func (c *configuration) allNodes() nodeMap {
-	allNodeMap := make(nodeMap)
-	for id, node := range c.c_NewNode {
-		allNodeMap[id] = node
-	}
+// func (c *configuration) allNodes() nodeMap {
+// 	allNodeMap := make(nodeMap)
+// 	for id, node := range c.c_NewNode {
+// 		allNodeMap[id] = node
+// 	}
 
-	for id, node := range c.c_OldNode {
-		allNodeMap[id] = node
-	}
-	return allNodeMap
-}
+// 	for id, node := range c.c_OldNode {
+// 		allNodeMap[id] = node
+// 	}
+// 	return allNodeMap
+// }
 
 // TODO: fill the pass function
 // func (c *configuration) pass() bool {

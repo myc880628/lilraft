@@ -8,10 +8,13 @@ import (
 )
 
 // Log is used as a way to ensure consensus
-// TODO: fill this
+// TODO: fill this, add mutex log maybe.
 type Log struct {
-	entries   []*LogEntry
-	lastIndex uint64
+	entries      []*LogEntry
+	lastIndex    uint64
+	prevLogIndex uint64
+	prevLogTerm  uint64
+	commitIndex  uint64
 }
 
 func newLog() *Log {
@@ -25,11 +28,18 @@ func (log *Log) lastIndexInc() {
 	log.lastIndex++
 }
 
+// TODO: fill this func
+func (log *Log) setCommitIndex(i uint64) {
+
+}
+
 func (log *Log) lastLogIndex() uint64 {
 	return log.lastIndex
 }
 
 func (log *Log) appendEntry(logEtry *LogEntry) {
+	log.prevLogIndex = log.lastLogIndex()
+	log.prevLogTerm = *log.entries[log.prevLogIndex].Term
 	log.lastIndexInc()
 	log.entries = append(log.entries, logEtry)
 }

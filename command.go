@@ -9,3 +9,6 @@ type Command interface {
 	Apply()            // server will use Apply() to run the command
 	Name() string      // The command's name
 }
+
+type NOOPCommand struct {
+}
