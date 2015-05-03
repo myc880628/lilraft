@@ -58,14 +58,11 @@ func (log *Log) entriesAfer(index uint64) (le []*LogEntry) {
 	return
 }
 
-// func (log *Log) appendEntry(logEtry *LogEntry) {
-// 	log.prevLogIndex = log.lastLogIndex()
-// 	log.prevLogTerm = *log.entries[log.prevLogIndex].Term
-// 	log.lastIndexInc()
-// 	log.entries = append(log.entries, logEtry)
-// }
-
-// LogEntry is the entry in log, it wraps the LogEntry in raftpb.proto
+func (log *Log) appendEntry(logEtry *LogEntry) {
+	log.Lock()
+	defer log.Unlock()
+	log.entries = append(log.entries, logEtry)
+}
 
 func (log *Log) newLogEntry(term uint64, command Command) (*LogEntry, error) {
 	// TODO: add more arguments later

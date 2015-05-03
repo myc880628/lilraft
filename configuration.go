@@ -12,6 +12,11 @@ type configuration struct {
 	c_NewNode  nodeMap
 }
 
+// TODO: fill this
+func NewConfig() *configuration {
+	return nil
+}
+
 // func (c *configuration) allNodes() nodeMap {
 // 	allNodeMap := make(nodeMap)
 // 	for id, node := range c.c_NewNode {

@@ -278,7 +278,6 @@ func (s *Server) Exec(command Command) error {
 // RegisterCommand registers client's commands that
 // implement Command interface. Only registered commands
 // can be decoded and executed by other nodes.
-// TODO: fill this
 func (s *Server) RegisterCommand(command Command) {
 	if command == nil {
 		panic("lilraft: Command cannot be nil")

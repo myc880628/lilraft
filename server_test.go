@@ -1,13 +1,11 @@
 package lilraft
 
-// import (
-// 	"bytes"
-// 	"testing"
-// )
+import (
+	"testing"
+)
 
-// var bb bytes.Buffer
-// var s = NewServer(1, bb, &configuration{})
+var a []int
 
-// func TestSendRequestVote(t *testing.T) {
-// 	s.requestVotes()
-// }
+func TestNewServer(t *testing.T) {
+	NewServer(1, a, nil)
+}

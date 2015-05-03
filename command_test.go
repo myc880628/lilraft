@@ -1,14 +1,28 @@
-package lilraft_test
+package lilraft
 
-import "fmt"
+var (
+	sNum uint64 = 0
+)
 
-type TestCommand struct {
+type testCommand struct {
+	serialNum uint64
 }
 
-func (T *TestCommand) Apply() {
-	fmt.Println("Test command Applying")
+func (t *testCommand) Name() string {
+	return "test"
 }
 
-func (T *TestCommand) Name() string {
-	return "Test"
+func (t *testCommand) SerialNum() uint64 {
+	return t.serialNum
+}
+
+func (t *testCommand) Apply() {
+	println("hello lilraft")
+}
+
+func newTestCommand() *testCommand {
+	sNum++
+	return &testCommand{
+		serialNum: sNum,
+	}
 }
