@@ -2,13 +2,18 @@ package lilraft
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 )
+
+// Logger
+var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
 
 // state constant
 const (
@@ -300,9 +305,6 @@ func (s *Server) requestVotes() {
 		responded := false
 		go func() { // send vote request simultaneously
 			for !responded { // not responded, keep trying
-				if id == s.id { // if it's the candidiate itself
-					return
-				}
 				pb := &RequestVoteRequest{
 					CandidateID:  proto.Uint32(s.id),
 					Term:         proto.Uint64(s.currentTerm),

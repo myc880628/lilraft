@@ -6,11 +6,11 @@ import (
 )
 
 const (
-	idPath            = "lilraft/id"
-	appendEntriesPath = "lilraft/appendentries"
-	requestVotePath   = "lilraft/requestvote"
-	commandPath       = "lilraft/command"
-	setConfigPath     = "lilraft/setconfig"
+	idPath            = "/lilraft/id"
+	appendEntriesPath = "/lilraft/appendentries"
+	requestVotePath   = "/lilraft/requestvote"
+	commandPath       = "/lilraft/command"
+	setConfigPath     = "/lilraft/setconfig"
 )
 
 // SetHTTPTransport accept a http multiplexer to handle other peers'

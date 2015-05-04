@@ -20,22 +20,43 @@ type Node interface {
 //  for server to send rpc to remote machine.
 type nodeMap map[uint32]Node
 
+func makeNodeMap(nodes ...Node) (nm nodeMap) {
+	nm = nodeMap{}
+	for _, node := range nodes {
+		nm[node.id()] = node
+	}
+	return
+}
+
 type HTTPNode struct {
-	remoteId uint32
-	url      *url.URL
+	ID  uint32
+	URL *url.URL
+}
+
+func NewHTTPNode(id uint32, rawurl string) (httpNode *HTTPNode) {
+	u, err := url.Parse(rawurl)
+	if err != nil {
+		panic(err)
+	}
+	u.Path = ""
+	logger.Printf("node url: %s\n", u.String())
+	return &HTTPNode{
+		ID:  id,
+		URL: u,
+	}
 }
 
 func (node *HTTPNode) id() uint32 {
-	return node.remoteId
+	return node.ID
 }
 
-// TODO: refactor this maybe.
+// TODO: refactor these rpc maybe.
 func (node *HTTPNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*RequestVoteResponse, error) {
 	rvrbytes, err := proto.Marshal(rvr)
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s%s", node.url.String(), requestVotePath)
+	url := fmt.Sprintf("%s%s", node.URL.String(), requestVotePath)
 	var bytesBuffer bytes.Buffer
 	if _, err = bytesBuffer.Write(rvrbytes); err != nil {
 		return nil, err
@@ -62,7 +83,7 @@ func (node *HTTPNode) rpcAppendEntries(server *Server, aer *AppendEntriesRequest
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s%s", node.url.String(), appendEntriesPath)
+	url := fmt.Sprintf("%s%s", node.URL.String(), appendEntriesPath)
 	var bytesBuffer bytes.Buffer
 	if _, err = bytesBuffer.Write(aerBytes); err != nil {
 		return nil, err

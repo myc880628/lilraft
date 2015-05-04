@@ -13,8 +13,13 @@ type configuration struct {
 }
 
 // TODO: fill this
-func NewConfig() *configuration {
-	return nil
+func NewConfig(nodes ...Node) (conf *configuration) {
+	conf = &configuration{
+		c_OldNode: makeNodeMap(nodes...),
+	}
+	conf.setState(c_old)
+	logger.Printf("Creating configuration...\n")
+	return
 }
 
 // func (c *configuration) allNodes() nodeMap {
