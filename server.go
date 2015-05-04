@@ -15,6 +15,9 @@ import (
 // Logger
 var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
 
+// Error
+var deponseError = fmt.Errorf("leader got deposed")
+
 // state constant
 const (
 	follower = iota
@@ -77,6 +80,18 @@ func (ni *nextIndex) set(id uint32, index uint64) {
 	ni.Unlock()
 }
 
+func (ni *nextIndex) inc(id uint32) {
+	ni.Lock()
+	ni.m[id]++
+	ni.Unlock()
+}
+
+func (ni *nextIndex) dec(id uint32) {
+	ni.Lock()
+	ni.m[id]--
+	ni.Unlock()
+}
+
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
 	//----from the paper------
@@ -97,7 +112,9 @@ type Server struct {
 	voteChan         chan *vote
 	config           *configuration
 	nodesVoteGranted map[uint32]bool
-	commandChan      chan wrappedCommand
+	//-------leader only------------
+	commandChan chan wrappedCommand
+	//------------------------------
 	mutexState
 }
 
@@ -214,19 +231,24 @@ func (s *Server) leaderloop() {
 				wrappedCommand.errChan <- err
 			}
 			s.log.appendEntry(newEntry)
-			s.sendAppendEntries()
+			err = s.sendAppendEntries()
+			wrappedCommand.errChan <- err
+			if err == deponseError { // if leader has been deposed
+				s.setState(follower)
+				return
+			}
 		}
 	}
 }
 
 // TODO: add more procedure
-func (s *Server) sendAppendEntries() {
+func (s *Server) sendAppendEntries() error {
 	theOtherNodes := s.theOtherNodes()
 	successChan := make(chan bool, len(theOtherNodes))
+	errChan := make(chan error, len(theOtherNodes))
 	for id, node := range theOtherNodes {
 		go func() {
-			success := false
-			for !success {
+			for {
 				pbAER := AppendEntriesRequest{
 					LeaderID:     proto.Uint32(s.id),
 					Term:         proto.Uint64(s.currentTerm),
@@ -236,18 +258,45 @@ func (s *Server) sendAppendEntries() {
 					Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
 				}
 				reponse, err := node.rpcAppendEntries(s, &pbAER)
-				success = reponse.GetSuccess()
-				if err != nil || success != true {
-					//????????
+				if err != nil {
+					continue
 				}
+				if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
+					errChan <- deponseError
+					return
+				}
+				if !reponse.GetSuccess() {
+					s.nextIndex.dec(id)
+					logger.Printf("append entries not succeedded, node %d dec ni to %d\n",
+						id, s.nextIndex.get(id))
+					continue
+				}
+				logger.Printf("node %d append entries succeedded\n", id)
+				s.nextIndex.inc(id)
+				successChan <- true
+				return
 			}
 		}()
 	}
-	for {
-		select {
-		case <-successChan:
+	successCount := 0
+	go func() {
+		for {
+			select {
+			case <-successChan:
+				successCount++
+				if successCount == len(theOtherNodes)/2 {
+					// got response from majority of nodes, sendAppendEntries()
+					// can quit, this goroutine keeps waiting for response
+					// quitChan <- true
+					errChan <- nil
+				}
+				if successCount == len(theOtherNodes) {
+					return // all nodes have accept request
+				}
+			}
 		}
-	}
+	}()
+	return <-errChan
 }
 
 func (s *Server) theOtherNodes() nodeMap {
