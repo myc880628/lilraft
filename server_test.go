@@ -22,4 +22,5 @@ func TestNewServer(t *testing.T) {
 	s1.Start()
 	s2.Start()
 	s3.Start()
+	select {}
 }

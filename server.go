@@ -41,12 +41,6 @@ type mutexState struct {
 	sync.RWMutex
 }
 
-// vote is passed through the server's voteChan
-type vote struct {
-	id      uint32
-	granted bool
-}
-
 func (mstate *mutexState) getState() uint8 {
 	mstate.RLock()
 	defer mstate.RUnlock()
@@ -97,11 +91,11 @@ type Server struct {
 	//----from the paper------
 	currentTerm      uint64
 	votefor          uint32
-	log              *Log
 	commitIndex      uint64
 	lastAppliedIndex uint64
-	nextIndex        nextIndex
 	matchIndex       []uint64
+	nextIndex        nextIndex
+	log              *Log
 	//------------------------
 	id              uint32
 	leader          uint32
@@ -109,8 +103,8 @@ type Server struct {
 	electionTimeout *time.Timer
 	nodemap         nodeMap
 	httpClient      http.Client
-	voteChan        chan *vote
 	config          *configuration
+	requestVoteChan chan *RequestVoteRequest
 	//-------leader only------------
 	commandChan chan wrappedCommand
 	//-----candidate only-----------
@@ -151,17 +145,16 @@ func NewServer(id uint32, context interface{}, config *configuration) (s *Server
 		panic("lilraft: configuration unset")
 	}
 	s = &Server{
-		id:      id,
-		leader:  noleader,
-		context: context,
-		// mutexState:  follower,
-		nodemap:     make(nodeMap),
-		currentTerm: 0,
-		log:         newLog(),
-		votefor:     0,
-		// voteCountChan: make(chan uint32, 5),
-		commandChan: make(chan wrappedCommand),
-		config:      config,
+		id:              id,
+		leader:          noleader,
+		context:         context,
+		currentTerm:     0,
+		log:             newLog(),
+		votefor:         0,
+		config:          config,
+		nodemap:         make(nodeMap),
+		commandChan:     make(chan wrappedCommand),
+		requestVoteChan: make(chan *RequestVoteRequest),
 	}
 	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
@@ -201,8 +194,10 @@ func (s *Server) followerloop() {
 		select {
 		case <-s.electionTimeout.C:
 			s.setState(candidate)
-			logger.Println("become candidate")
+			logger.Printf("node %d become candidate\n", s.id)
 			return
+		case rvr := <-s.requestVoteChan:
+			//????????
 		}
 	}
 }

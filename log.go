@@ -30,13 +30,21 @@ func (log *Log) setCommitIndex(i uint64) {
 func (log *Log) lastLogIndex() uint64 {
 	log.RLock()
 	defer log.RUnlock()
-	return *log.entries[len(log.entries)-1].Index
+	if len(log.entries) > 0 {
+		return *log.entries[len(log.entries)-1].Index
+	} else {
+		return 0
+	}
 }
 
 func (log *Log) lastLogTerm() uint64 {
 	log.RLock()
 	defer log.RUnlock()
-	return *log.entries[len(log.entries)].Term
+	if len(log.entries) > 0 {
+		return *log.entries[len(log.entries)-1].Term
+	} else {
+		return 0
+	}
 }
 
 func (log *Log) prevLogTerm(nextIndex uint64) uint64 {

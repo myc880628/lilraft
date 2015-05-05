@@ -2,7 +2,10 @@ package lilraft
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
+
+	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -18,10 +21,10 @@ const (
 // Run this before running server.Start().
 func (s *Server) SetHTTPTransport(mux *http.ServeMux, port int) {
 	mux.HandleFunc(idPath, idHandleFunc(s))
-	mux.HandleFunc(appendEntriesPath, appendEntriesHandleFunc(s))
-	mux.HandleFunc(requestVotePath, requestVoteHandleFunc(s))
-	mux.HandleFunc(commandPath, commandHandleFunc(s))
-	mux.HandleFunc(setConfigPath, setConfigHandleFunc(s))
+	mux.HandleFunc(appendEntriesPath, appendEntriesHandler(s))
+	mux.HandleFunc(requestVotePath, requestVoteHandler(s))
+	mux.HandleFunc(commandPath, commandHandler(s))
+	mux.HandleFunc(setConfigPath, setConfigHandler(s))
 	go http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
@@ -32,28 +35,37 @@ func idHandleFunc(s *Server) http.HandlerFunc {
 }
 
 // TODO: fill this func
-func appendEntriesHandleFunc(s *Server) http.HandlerFunc {
+func appendEntriesHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
 }
 
 // TODO: fill this func
-func requestVoteHandleFunc(s *Server) http.HandlerFunc {
+func requestVoteHandler(s *Server) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var rvr *RequestVoteRequest
+		data, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			logger.Println("Read vote request error")
+		}
+		if err = proto.Unmarshal(data, rvr); err != nil {
+			logger.Println("unmarshal RequestVoteRequest error")
+		}
+		s.requestVoteChan <- rvr
+	}
+}
+
+// TODO: fill this func
+func commandHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
 }
 
 // TODO: fill this func
-func commandHandleFunc(s *Server) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-	}
-}
-
-// TODO: fill this func
-func setConfigHandleFunc(s *Server) http.HandlerFunc {
+func setConfigHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
