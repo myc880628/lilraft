@@ -407,7 +407,7 @@ func (s *Server) electionPass() bool {
 				votesCount++
 			}
 		}
-		if votesCount >= len(s.nodesVoteGranted)/2+1 {
+		if votesCount >= len(s.config.c_OldNode)/2+1 {
 			return true
 		}
 	} else if s.config.getState() == c_old_new { // candidate must be approved by Cold and Cold,new.
