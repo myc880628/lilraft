@@ -161,6 +161,7 @@ func NewServer(id uint32, context interface{}, config *configuration) (s *Server
 		votefor:     0,
 		// voteCountChan: make(chan uint32, 5),
 		commandChan: make(chan wrappedCommand),
+		config:      config,
 	}
 	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
@@ -200,6 +201,7 @@ func (s *Server) followerloop() {
 		select {
 		case <-s.electionTimeout.C:
 			s.setState(candidate)
+			logger.Println("become candidate")
 			return
 		}
 	}
@@ -402,8 +404,8 @@ func (s *Server) requestVotes() {
 func (s *Server) electionPass() bool {
 	if s.config.getState() == c_old {
 		votesCount := 0
-		for _, granted := range s.nodesVoteGranted {
-			if granted {
+		for id := range s.config.c_OldNode {
+			if s.nodesVoteGranted[id] == true {
 				votesCount++
 			}
 		}
