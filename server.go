@@ -103,19 +103,26 @@ type Server struct {
 	nextIndex        nextIndex
 	matchIndex       []uint64
 	//------------------------
-	id               uint32
-	leader           uint32
-	context          interface{}
-	electionTimeout  *time.Timer
-	nodemap          nodeMap
-	httpClient       http.Client
-	voteChan         chan *vote
-	config           *configuration
-	nodesVoteGranted map[uint32]bool
+	id              uint32
+	leader          uint32
+	context         interface{}
+	electionTimeout *time.Timer
+	nodemap         nodeMap
+	httpClient      http.Client
+	voteChan        chan *vote
+	config          *configuration
 	//-------leader only------------
 	commandChan chan wrappedCommand
-	//------------------------------
+	//-----candidate only-----------
+	voteResponseChan chan wrappedVoteResponse
+	nodesVoteGranted map[uint32]bool
+	//-----------------------------
 	mutexState
+}
+
+type wrappedVoteResponse struct {
+	id uint32
+	*RequestVoteResponse
 }
 
 type wrappedCommand struct {
@@ -200,25 +207,40 @@ func (s *Server) followerloop() {
 
 // TODO: fill this.
 func (s *Server) candidateloop() {
+	s.nodesVoteGranted = make(map[uint32]bool)
 	s.leader = noleader
 	s.currentTerm++ // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
-	s.nodesVoteGranted = make(map[uint32]bool)
-	s.voteForItself()
 	s.requestVotes()
-	if s.electionPass() {
-		// TODO: Add more operation
-		s.setState(leader)
-		s.votefor = notVotedYet
-		return
-	}
+	s.voteForItself()
 	for s.getState() == candidate {
 		select {
 		case <-s.electionTimeout.C:
-			// Candidate start a new election
+			// Candidate timeouts and start a new election
 			return
+		case resp := <-s.voteResponseChan:
+			if rTerm := resp.GetTerm(); rTerm > s.currentTerm {
+				s.currentTerm = rTerm
+				s.stepDown()
+				return
+			}
+			if resp.GetVoteGranted() {
+				s.nodesVoteGranted[resp.id] = true
+			}
+			if s.electionPass() {
+				s.setState(leader)
+				s.votefor = notVotedYet
+				s.leader = s.id
+				return
+			}
 		}
 	}
+}
+
+// TODO: fill this
+func (s *Server) stepDown() {
+	s.setState(follower)
+	s.votefor = notVotedYet
 }
 
 // TODO: fill this.
@@ -349,7 +371,7 @@ func (s *Server) voteForItself() {
 func (s *Server) requestVotes() {
 	theOtherNodes := s.theOtherNodes()
 	// if re-relect, reset the voteChan
-	s.voteChan = make(chan *vote, len(theOtherNodes))
+	s.voteResponseChan = make(chan wrappedVoteResponse, len(theOtherNodes))
 	for id, node := range theOtherNodes {
 		responded := false
 		go func() { // send vote request simultaneously
@@ -368,22 +390,12 @@ func (s *Server) requestVotes() {
 					continue
 				}
 				responded = true
-				s.voteChan <- &vote{
-					id:      id,
-					granted: responseProto.GetVoteGranted(),
+				s.voteResponseChan <- wrappedVoteResponse{
+					id:                  id,
+					RequestVoteResponse: responseProto,
 				}
 			}
 		}()
-	}
-
-	for {
-		select {
-		case vote := <-s.voteChan:
-			s.nodesVoteGranted[vote.id] = vote.granted
-			if len(s.nodesVoteGranted) == len(theOtherNodes)/2 { // if majority nodes including canndidate have voted
-				return
-			}
-		}
 	}
 }
 
