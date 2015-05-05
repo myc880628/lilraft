@@ -362,7 +362,7 @@ func (s *Server) requestVotes() {
 				}
 				responseProto, err := node.rpcRequestVote(s, pb)
 				if err != nil {
-					fmt.Println(err.Error())
+					logger.Println(err.Error())
 					responded = false
 					// does not timeout and try to send request over and over agian
 					continue
@@ -380,7 +380,7 @@ func (s *Server) requestVotes() {
 		select {
 		case vote := <-s.voteChan:
 			s.nodesVoteGranted[vote.id] = vote.granted
-			if len(s.nodesVoteGranted) == len(theOtherNodes)+1 { // if all nodes including canndidate have voted
+			if len(s.nodesVoteGranted) == len(theOtherNodes)/2 { // if majority nodes including canndidate have voted
 				return
 			}
 		}

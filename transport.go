@@ -16,12 +16,13 @@ const (
 // SetHTTPTransport accept a http multiplexer to handle other peers'
 // RPCs like RequestVote and AppendEntry, etc.
 // Run this before running server.Start().
-func (s *Server) SetHTTPTransport(mux *http.ServeMux) {
+func (s *Server) SetHTTPTransport(mux *http.ServeMux, port int) {
 	mux.HandleFunc(idPath, idHandleFunc(s))
 	mux.HandleFunc(appendEntriesPath, appendEntriesHandleFunc(s))
 	mux.HandleFunc(requestVotePath, requestVoteHandleFunc(s))
 	mux.HandleFunc(commandPath, commandHandleFunc(s))
 	mux.HandleFunc(setConfigPath, setConfigHandleFunc(s))
+	go http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 
 func idHandleFunc(s *Server) http.HandlerFunc {
