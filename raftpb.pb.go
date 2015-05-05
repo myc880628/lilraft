@@ -195,7 +195,6 @@ func (m *RequestVoteRequest) GetLastLogTerm() uint64 {
 type RequestVoteResponse struct {
 	Term             *uint64 `protobuf:"varint,1,req" json:"Term,omitempty"`
 	VoteGranted      *bool   `protobuf:"varint,2,req" json:"VoteGranted,omitempty"`
-	Reason           *string `protobuf:"bytes,3,req" json:"Reason,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -215,13 +214,6 @@ func (m *RequestVoteResponse) GetVoteGranted() bool {
 		return *m.VoteGranted
 	}
 	return false
-}
-
-func (m *RequestVoteResponse) GetReason() string {
-	if m != nil && m.Reason != nil {
-		return *m.Reason
-	}
-	return ""
 }
 
 func init() {

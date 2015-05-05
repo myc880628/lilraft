@@ -89,27 +89,28 @@ func (ni *nextIndex) dec(id uint32) {
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
 	//----from the paper------
-	currentTerm      uint64
 	votefor          uint32
+	currentTerm      uint64
 	commitIndex      uint64
 	lastAppliedIndex uint64
 	matchIndex       []uint64
 	nextIndex        nextIndex
 	log              *Log
 	//------------------------
-	id              uint32
-	leader          uint32
-	context         interface{}
-	electionTimeout *time.Timer
-	nodemap         nodeMap
-	httpClient      http.Client
-	config          *configuration
-	requestVoteChan chan *RequestVoteRequest
+	id                 uint32
+	leader             uint32
+	context            interface{}
+	electionTimeout    *time.Timer
+	nodemap            nodeMap
+	httpClient         http.Client
+	config             *configuration
+	getVoteRequestChan chan wrappedVoteRequest
+	// responseChan
 	//-------leader only------------
 	commandChan chan wrappedCommand
 	//-----candidate only-----------
-	voteResponseChan chan wrappedVoteResponse
-	nodesVoteGranted map[uint32]bool
+	getVoteResponseChan chan wrappedVoteResponse
+	nodesVoteGranted    map[uint32]bool
 	//-----------------------------
 	mutexState
 }
@@ -122,6 +123,11 @@ type wrappedVoteResponse struct {
 type wrappedCommand struct {
 	command Command
 	errChan chan error
+}
+
+type wrappedVoteRequest struct {
+	request      *RequestVoteRequest
+	responseChan chan *RequestVoteResponse
 }
 
 func randomElectionTimeout() time.Duration {
@@ -145,16 +151,16 @@ func NewServer(id uint32, context interface{}, config *configuration) (s *Server
 		panic("lilraft: configuration unset")
 	}
 	s = &Server{
-		id:              id,
-		leader:          noleader,
-		context:         context,
-		currentTerm:     0,
-		log:             newLog(),
-		votefor:         0,
-		config:          config,
-		nodemap:         make(nodeMap),
-		commandChan:     make(chan wrappedCommand),
-		requestVoteChan: make(chan *RequestVoteRequest),
+		id:                 id,
+		leader:             noleader,
+		context:            context,
+		currentTerm:        0,
+		log:                newLog(),
+		votefor:            0,
+		config:             config,
+		nodemap:            make(nodeMap),
+		commandChan:        make(chan wrappedCommand),
+		getVoteRequestChan: make(chan wrappedVoteRequest),
 	}
 	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
@@ -196,8 +202,21 @@ func (s *Server) followerloop() {
 			s.setState(candidate)
 			logger.Printf("node %d become candidate\n", s.id)
 			return
-		case rvr := <-s.requestVoteChan:
-			//????????
+		case wrappedRequest := <-s.getVoteRequestChan:
+			voteRequest := wrappedRequest.request
+			resp := &RequestVoteResponse{
+				Term:        proto.Uint64(s.currentTerm),
+				VoteGranted: proto.Bool(false),
+			}
+			if voteRequest.GetLastLogTerm() > s.currentTerm {
+				s.votefor = voteRequest.GetCandidateID()
+				resp.VoteGranted = proto.Bool(true)
+			} else if voteRequest.GetLastLogTerm() == s.currentTerm &&
+				voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
+				s.votefor = voteRequest.GetCandidateID()
+				resp.VoteGranted = proto.Bool(true)
+			}
+			wrappedRequest.responseChan <- resp
 		}
 	}
 }
@@ -215,7 +234,7 @@ func (s *Server) candidateloop() {
 		case <-s.electionTimeout.C:
 			// Candidate timeouts and start a new election
 			return
-		case resp := <-s.voteResponseChan:
+		case resp := <-s.getVoteResponseChan:
 			if rTerm := resp.GetTerm(); rTerm > s.currentTerm {
 				s.currentTerm = rTerm
 				s.stepDown()
@@ -368,7 +387,7 @@ func (s *Server) voteForItself() {
 func (s *Server) requestVotes() {
 	theOtherNodes := s.theOtherNodes()
 	// if re-relect, reset the voteChan
-	s.voteResponseChan = make(chan wrappedVoteResponse, len(theOtherNodes))
+	s.getVoteResponseChan = make(chan wrappedVoteResponse, len(theOtherNodes))
 	for id, node := range theOtherNodes {
 		responded := false
 		go func() { // send vote request simultaneously
@@ -387,7 +406,7 @@ func (s *Server) requestVotes() {
 					continue
 				}
 				responded = true
-				s.voteResponseChan <- wrappedVoteResponse{
+				s.getVoteResponseChan <- wrappedVoteResponse{
 					id:                  id,
 					RequestVoteResponse: responseProto,
 				}

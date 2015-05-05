@@ -32,5 +32,4 @@ message RequestVoteRequest {
 message RequestVoteResponse {
         required uint64 Term=1;
         required bool VoteGranted=2;
-        required string Reason=3;
 }
