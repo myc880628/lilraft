@@ -166,6 +166,7 @@ func NewServer(id uint32, context interface{}, config *configuration) (s *Server
 	// http.Client can cache TCP connections
 	s.httpClient.Transport = &http.Transport{DisableKeepAlives: false}
 	s.httpClient.Timeout = time.Duration(minTimeout/2) * time.Millisecond
+	time.Sleep(1 * time.Second)
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
 	s.resetElectionTimeout()
 	return
@@ -208,7 +209,9 @@ func (s *Server) followerloop() {
 				Term:        proto.Uint64(s.currentTerm),
 				VoteGranted: proto.Bool(false),
 			}
-			if voteRequest.GetLastLogTerm() > s.currentTerm {
+			if s.votefor != notVotedYet {
+				resp.VoteGranted = proto.Bool(false)
+			} else if voteRequest.GetLastLogTerm() > s.currentTerm {
 				s.votefor = voteRequest.GetCandidateID()
 				resp.VoteGranted = proto.Bool(true)
 			} else if voteRequest.GetLastLogTerm() == s.currentTerm &&
@@ -244,6 +247,7 @@ func (s *Server) candidateloop() {
 				s.nodesVoteGranted[resp.id] = true
 			}
 			if s.electionPass() {
+				logger.Printf("node %d became leader\n", s.id)
 				s.setState(leader)
 				s.votefor = notVotedYet
 				s.leader = s.id
@@ -400,7 +404,7 @@ func (s *Server) requestVotes() {
 				}
 				responseProto, err := node.rpcRequestVote(s, pb)
 				if err != nil {
-					logger.Println(err.Error())
+					// logger.Println("vote response error:", err.Error())
 					responded = false
 					// does not timeout and try to send request over and over agian
 					continue

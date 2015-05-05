@@ -3,6 +3,7 @@ package lilraft
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/url"
 
@@ -67,12 +68,9 @@ func (node *HTTPNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	reponseData, err := ioutil.ReadAll(httpResponse.Body)
-	if err != nil {
-		return nil, err
-	}
+	// fmt.Println(httpResponse.Status)
 	responseProto := &RequestVoteResponse{}
-	if err = proto.Unmarshal(reponseData, responseProto); err != nil {
+	if err = Decode(httpResponse.Body, responseProto); err != nil {
 		return nil, err
 	}
 	return responseProto, nil
@@ -94,13 +92,21 @@ func (node *HTTPNode) rpcAppendEntries(server *Server, aer *AppendEntriesRequest
 	if err != nil {
 		return nil, err
 	}
-	responseData, err := ioutil.ReadAll(httpResponse.Body)
-	if err != nil {
-		return nil, err
-	}
 	responseProto := &AppendEntriesResponse{}
-	if err = proto.Unmarshal(responseData, responseProto); err != nil {
+	if err = Decode(httpResponse.Body, responseProto); err != nil {
 		return nil, err
 	}
 	return responseProto, nil
+}
+
+func Decode(body io.Reader, pb proto.Message) error {
+	data, err := ioutil.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	if err = proto.Unmarshal(data, pb); err != nil {
+		return err
+	}
+	// logger.Println(pb.String())
+	return nil
 }

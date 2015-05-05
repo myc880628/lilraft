@@ -2,7 +2,6 @@ package lilraft
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/golang/protobuf/proto"
@@ -25,7 +24,7 @@ func (s *Server) SetHTTPTransport(mux *http.ServeMux, port int) {
 	mux.HandleFunc(requestVotePath, requestVoteHandler(s))
 	mux.HandleFunc(commandPath, commandHandler(s))
 	mux.HandleFunc(setConfigPath, setConfigHandler(s))
-	go http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	go http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 }
 
 func idHandleFunc(s *Server) http.HandlerFunc {
@@ -45,21 +44,24 @@ func appendEntriesHandler(s *Server) http.HandlerFunc {
 func requestVoteHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		var voteRequest *RequestVoteRequest
-		data, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			logger.Println("Read vote request error")
-		}
-		if err = proto.Unmarshal(data, voteRequest); err != nil {
-			logger.Println("unmarshal RequestVoteRequest error")
+		logger.Println("Vote Request in comming!")
+		voteRequest := &RequestVoteRequest{}
+		if err := Decode(r.Body, voteRequest); err != nil {
+			logger.Println("decode voteRequest error: ", err.Error())
 		}
 		respChan := make(chan *RequestVoteResponse)
 		s.getVoteRequestChan <- wrappedVoteRequest{
 			request:      voteRequest,
 			responseChan: respChan,
 		}
-		<-respChan
-		// TODO: Add more procedure
+		responseProto := <-respChan
+		responseBytes, err := proto.Marshal(responseProto)
+		if err != nil {
+			logger.Println("marshal response proto error")
+		}
+		if _, err = w.Write(responseBytes); err != nil {
+			logger.Println("write to node: ", err)
+		}
 	}
 }
 

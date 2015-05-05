@@ -18,7 +18,6 @@ func NewConfig(nodes ...Node) (conf *configuration) {
 		c_OldNode: makeNodeMap(nodes...),
 	}
 	conf.setState(c_old)
-	logger.Printf("Creating configuration...\n")
 	return
 }
 
