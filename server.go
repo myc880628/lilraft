@@ -82,7 +82,9 @@ func (ni *nextIndex) inc(id uint32) {
 
 func (ni *nextIndex) dec(id uint32) {
 	ni.Lock()
-	ni.m[id]--
+	if ni.m[id] > 0 {
+		ni.m[id]--
+	}
 	ni.Unlock()
 }
 
@@ -97,14 +99,15 @@ type Server struct {
 	nextIndex        nextIndex
 	log              *Log
 	//------------------------
-	id                 uint32
-	leader             uint32
-	context            interface{}
-	electionTimeout    *time.Timer
-	nodemap            nodeMap
-	httpClient         http.Client
-	config             *configuration
-	getVoteRequestChan chan wrappedVoteRequest
+	id                   uint32
+	leader               uint32
+	context              interface{}
+	electionTimeout      *time.Timer
+	nodemap              nodeMap
+	httpClient           http.Client
+	config               *configuration
+	getVoteRequestChan   chan wrappedVoteRequest
+	getAppendEntriesChan chan wrappedAppendRequest
 	// responseChan
 	//-------leader only------------
 	commandChan chan wrappedCommand
@@ -123,6 +126,11 @@ type wrappedVoteResponse struct {
 type wrappedCommand struct {
 	command Command
 	errChan chan error
+}
+
+type wrappedAppendRequest struct {
+	request      *AppendEntriesRequest
+	responseChan chan *AppendEntriesResponse
 }
 
 type wrappedVoteRequest struct {
@@ -151,16 +159,17 @@ func NewServer(id uint32, context interface{}, config *configuration) (s *Server
 		panic("lilraft: configuration unset")
 	}
 	s = &Server{
-		id:                 id,
-		leader:             noleader,
-		context:            context,
-		currentTerm:        0,
-		log:                newLog(),
-		votefor:            0,
-		config:             config,
-		nodemap:            make(nodeMap),
-		commandChan:        make(chan wrappedCommand),
-		getVoteRequestChan: make(chan wrappedVoteRequest),
+		id:                   id,
+		leader:               noleader,
+		context:              context,
+		currentTerm:          0,
+		log:                  newLog(),
+		votefor:              0,
+		config:               config,
+		nodemap:              make(nodeMap),
+		commandChan:          make(chan wrappedCommand),
+		getVoteRequestChan:   make(chan wrappedVoteRequest),
+		getAppendEntriesChan: make(chan wrappedAppendRequest),
 	}
 	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
@@ -203,25 +212,46 @@ func (s *Server) followerloop() {
 			s.setState(candidate)
 			logger.Printf("node %d become candidate\n", s.id)
 			return
-		case wrappedRequest := <-s.getVoteRequestChan:
-			voteRequest := wrappedRequest.request
+		case wrappedVoteRequest := <-s.getVoteRequestChan:
+			voteRequest := wrappedVoteRequest.request
 			resp := &RequestVoteResponse{
 				Term:        proto.Uint64(s.currentTerm),
 				VoteGranted: proto.Bool(false),
 			}
 			if s.votefor != notVotedYet {
 				resp.VoteGranted = proto.Bool(false)
-			} else if voteRequest.GetLastLogTerm() > s.currentTerm {
+			} else if s.currentTerm > voteRequest.GetTerm() {
+				resp.VoteGranted = proto.Bool(false)
+			} else if voteRequest.GetLastLogTerm() > s.log.lastLogTerm() {
 				s.votefor = voteRequest.GetCandidateID()
 				resp.VoteGranted = proto.Bool(true)
-			} else if voteRequest.GetLastLogTerm() == s.currentTerm &&
+			} else if voteRequest.GetLastLogTerm() == s.log.lastLogTerm() &&
 				voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
-				s.votefor = voteRequest.GetCandidateID()
+				s.votefor = voteRequest.GetCandidateID() // 更新term的时候再将votefor更新为notVotedYet
 				resp.VoteGranted = proto.Bool(true)
 			}
-			wrappedRequest.responseChan <- resp
+			wrappedVoteRequest.responseChan <- resp
+		case wrappedAppendRequest := <-s.getAppendEntriesChan:
+			appendRequest := wrappedAppendRequest.request
+			resp := s.handleAppendEntriesRequest(appendRequest)
+			wrappedAppendRequest.responseChan <- resp
 		}
 	}
+}
+
+func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest) *AppendEntriesResponse {
+	resp := &AppendEntriesResponse{Term: proto.Uint64(s.currentTerm)}
+	if s.currentTerm > appendRequest.GetTerm() {
+		resp.Success = proto.Bool(false)
+		return resp
+	}
+	if s.log.contains(appendRequest.GetPrevLogIndex(), appendRequest.GetPrevLogTerm()) {
+		s.log.appendEntries(appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
+		resp.Success = proto.Bool(true)
+	} else {
+		resp.Success = proto.Bool(false)
+	}
+	return resp
 }
 
 // TODO: fill this.
@@ -269,6 +299,7 @@ func (s *Server) stepDown() {
 
 // TODO: fill this.
 func (s *Server) leaderloop() {
+	// 记得初始化nextIndex
 	for s.getState() == leader {
 		select {
 		case wrappedCommand := <-s.commandChan:
@@ -331,9 +362,10 @@ func (s *Server) sendAppendEntries() error {
 			case <-successChan:
 				successCount++
 				if successCount == len(theOtherNodes)/2 {
-					// got response from majority of nodes, sendAppendEntries()
-					// can quit, this goroutine keeps waiting for response
-					// quitChan <- true
+					// PAPER: Agreement(forelectionsandentrycommitment)requires
+					// separate majorities from both the old and new
+					// configurations.
+					// so this needs to be changed later
 					errChan <- nil
 				}
 				if successCount == len(theOtherNodes) {

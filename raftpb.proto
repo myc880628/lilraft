@@ -19,7 +19,6 @@ message AppendEntriesRequest {
 message AppendEntriesResponse {
         required uint64 Term=1;
         required bool Success=2;
-        required string Reason=3;
 }
 
 message RequestVoteRequest {

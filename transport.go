@@ -34,7 +34,21 @@ func idHandleFunc(s *Server) http.HandlerFunc {
 // TODO: fill this func
 func appendEntriesHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		defer r.Body.Close()
+		logger.Println("node %d: append entries in comming!", s.id)
+		appendEntriesRequest := &AppendEntriesRequest{}
+		if err := Decode(r.Body, appendEntriesRequest); err != nil {
+			logger.Println("Decode appendEntriesRequest err: ", err.Error())
+		}
+		respChan := make(chan *AppendEntriesResponse)
+		s.getAppendEntriesChan <- wrappedAppendRequest{
+			request:      appendEntriesRequest,
+			responseChan: respChan,
+		}
+		responseProto := <-respChan
+		if err := Encode(w, responseProto); err != nil {
+			logger.Println("encode error: ", err.Error())
+		}
 	}
 }
 
@@ -42,7 +56,7 @@ func appendEntriesHandler(s *Server) http.HandlerFunc {
 func requestVoteHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		logger.Println("Vote Request in comming!")
+		logger.Println("node %d: Vote Request in comming!", s.id)
 		voteRequest := &RequestVoteRequest{}
 		if err := Decode(r.Body, voteRequest); err != nil {
 			logger.Println("decode voteRequest error: ", err.Error())

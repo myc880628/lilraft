@@ -123,7 +123,6 @@ func (m *AppendEntriesRequest) GetEntries() []*LogEntry {
 type AppendEntriesResponse struct {
 	Term             *uint64 `protobuf:"varint,1,req" json:"Term,omitempty"`
 	Success          *bool   `protobuf:"varint,2,req" json:"Success,omitempty"`
-	Reason           *string `protobuf:"bytes,3,req" json:"Reason,omitempty"`
 	XXX_unrecognized []byte  `json:"-"`
 }
 
@@ -143,13 +142,6 @@ func (m *AppendEntriesResponse) GetSuccess() bool {
 		return *m.Success
 	}
 	return false
-}
-
-func (m *AppendEntriesResponse) GetReason() string {
-	if m != nil && m.Reason != nil {
-		return *m.Reason
-	}
-	return ""
 }
 
 type RequestVoteRequest struct {
