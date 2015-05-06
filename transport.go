@@ -3,8 +3,6 @@ package lilraft
 import (
 	"fmt"
 	"net/http"
-
-	"github.com/golang/protobuf/proto"
 )
 
 const (
@@ -55,12 +53,8 @@ func requestVoteHandler(s *Server) http.HandlerFunc {
 			responseChan: respChan,
 		}
 		responseProto := <-respChan
-		responseBytes, err := proto.Marshal(responseProto)
-		if err != nil {
-			logger.Println("marshal response proto error")
-		}
-		if _, err = w.Write(responseBytes); err != nil {
-			logger.Println("write to node: ", err)
+		if err := Encode(w, responseProto); err != nil {
+			logger.Println("encode error: ", err.Error())
 		}
 	}
 }

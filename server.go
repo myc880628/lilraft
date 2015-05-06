@@ -247,6 +247,10 @@ func (s *Server) candidateloop() {
 				s.nodesVoteGranted[resp.id] = true
 			}
 			if s.electionPass() {
+				// TODO: delete these logger
+				for id, _ := range s.nodesVoteGranted {
+					logger.Printf("node %d vote for node %d", id, s.id)
+				}
 				logger.Printf("node %d became leader\n", s.id)
 				s.setState(leader)
 				s.votefor = notVotedYet

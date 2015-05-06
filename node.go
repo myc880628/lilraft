@@ -53,16 +53,11 @@ func (node *HTTPNode) id() uint32 {
 
 // TODO: refactor these rpc maybe.
 func (node *HTTPNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*RequestVoteResponse, error) {
-	rvrbytes, err := proto.Marshal(rvr)
-	if err != nil {
+	var bytesBuffer bytes.Buffer
+	if err := Encode(&bytesBuffer, rvr); err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("%s%s", node.URL.String(), requestVotePath)
-	var bytesBuffer bytes.Buffer
-	if _, err = bytesBuffer.Write(rvrbytes); err != nil {
-		return nil, err
-	}
-
 	// Send request to node
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
@@ -77,16 +72,11 @@ func (node *HTTPNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*
 }
 
 func (node *HTTPNode) rpcAppendEntries(server *Server, aer *AppendEntriesRequest) (*AppendEntriesResponse, error) {
-	aerBytes, err := proto.Marshal(aer)
-	if err != nil {
+	var bytesBuffer bytes.Buffer
+	if err := Encode(&bytesBuffer, aer); err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("%s%s", node.URL.String(), appendEntriesPath)
-	var bytesBuffer bytes.Buffer
-	if _, err = bytesBuffer.Write(aerBytes); err != nil {
-		return nil, err
-	}
-
 	// Send request to nodes
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
@@ -107,6 +97,16 @@ func Decode(body io.Reader, pb proto.Message) error {
 	if err = proto.Unmarshal(data, pb); err != nil {
 		return err
 	}
-	// logger.Println(pb.String())
+	return nil
+}
+
+func Encode(w io.Writer, pb proto.Message) error {
+	data, err := proto.Marshal(pb)
+	if err != nil {
+		return err
+	}
+	if _, err = w.Write(data); err != nil {
+		return err
+	}
 	return nil
 }
