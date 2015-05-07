@@ -12,14 +12,14 @@ import (
 
 // Node represent the remote machine ndoe
 type Node interface {
-	id() uint32
+	id() int32
 	rpcAppendEntries(*Server, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	rpcRequestVote(*Server, *RequestVoteRequest) (*RequestVoteResponse, error)
 }
 
 // nodeMap wraps some useful function with a map
 //  for server to send rpc to remote machine.
-type nodeMap map[uint32]Node
+type nodeMap map[int32]Node
 
 func makeNodeMap(nodes ...Node) (nm nodeMap) {
 	nm = nodeMap{}
@@ -30,11 +30,11 @@ func makeNodeMap(nodes ...Node) (nm nodeMap) {
 }
 
 type HTTPNode struct {
-	ID  uint32
+	ID  int32
 	URL *url.URL
 }
 
-func NewHTTPNode(id uint32, rawurl string) (httpNode *HTTPNode) {
+func NewHTTPNode(id int32, rawurl string) (httpNode *HTTPNode) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		panic(err)
@@ -47,7 +47,7 @@ func NewHTTPNode(id uint32, rawurl string) (httpNode *HTTPNode) {
 	}
 }
 
-func (node *HTTPNode) id() uint32 {
+func (node *HTTPNode) id() int32 {
 	return node.ID
 }
 

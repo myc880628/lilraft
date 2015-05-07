@@ -1,34 +1,34 @@
 package lilraft;
 
 message LogEntry {
-        required uint64 Index=1;
-        required uint64 Term=2;
+        required int64 Index=1;
+        required int64 Term=2;
         required string CommandName=3;
         optional bytes Command=4;
 }
 
 message AppendEntriesRequest {
-        required uint32 LeaderID=1;
-        required uint64 Term=2;
-        required uint64 PrevLogIndex=3;
-        required uint64 PrevLogTerm=4;
-        required uint64 CommitIndex=5;
+        required int32 LeaderID=1;
+        required int64 Term=2;
+        required int64 PrevLogIndex=3;
+        required int64 PrevLogTerm=4;
+        required int64 CommitIndex=5;
         repeated LogEntry Entries=6;
 }
 
 message AppendEntriesResponse {
-        required uint64 Term=1;
+        required int64 Term=1;
         required bool Success=2;
 }
 
 message RequestVoteRequest {
-        required uint32 CandidateID=1;
-        required uint64 Term=2;
-        required uint64 LastLogIndex=3;
-        required uint64 LastLogTerm=4;
+        required int32 CandidateID=1;
+        required int64 Term=2;
+        required int64 LastLogIndex=3;
+        required int64 LastLogTerm=4;
 }
 
 message RequestVoteResponse {
-        required uint64 Term=1;
+        required int64 Term=1;
         required bool VoteGranted=2;
 }

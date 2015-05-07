@@ -16,7 +16,7 @@ import (
 var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
 
 // Error
-var deponseError = fmt.Errorf("leader got deposed")
+var deposeError = fmt.Errorf("leader got deposed")
 
 // state constant
 const (
@@ -32,8 +32,16 @@ const notVotedYet = 0
 var (
 	minTimeout = 150            // minimum timeout: 150 ms
 	maxTimeout = minTimeout * 2 //maximum timeout: 300ms
-	// electionTimeout
 )
+
+func randomElectionTimeout() time.Duration {
+	d := minTimeout + rand.Intn(maxTimeout-minTimeout)
+	return time.Duration(d) * time.Millisecond
+}
+
+func hearbeatInterval() time.Duration {
+	return time.Duration(minTimeout/10) * time.Millisecond
+}
 
 // mutexState wraps stateInt with a Mutex
 type mutexState struct {
@@ -54,11 +62,11 @@ func (mstate *mutexState) setState(stateInt uint8) {
 }
 
 type nextIndex struct {
-	m map[uint32]uint64
+	m map[int32]int64
 	sync.RWMutex
 }
 
-func (ni *nextIndex) get(id uint32) uint64 {
+func (ni *nextIndex) get(id int32) int64 {
 	ni.RLock()
 	defer ni.RUnlock()
 	if index, ok := ni.m[id]; !ok {
@@ -68,19 +76,19 @@ func (ni *nextIndex) get(id uint32) uint64 {
 	}
 }
 
-func (ni *nextIndex) set(id uint32, index uint64) {
+func (ni *nextIndex) set(id int32, index int64) {
 	ni.Lock()
 	ni.m[id] = index
 	ni.Unlock()
 }
 
-func (ni *nextIndex) inc(id uint32) {
+func (ni *nextIndex) inc(id int32) {
 	ni.Lock()
 	ni.m[id]++
 	ni.Unlock()
 }
 
-func (ni *nextIndex) dec(id uint32) {
+func (ni *nextIndex) dec(id int32) {
 	ni.Lock()
 	if ni.m[id] > 0 {
 		ni.m[id]--
@@ -91,16 +99,16 @@ func (ni *nextIndex) dec(id uint32) {
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
 	//----from the paper------
-	votefor          uint32
-	currentTerm      uint64
-	commitIndex      uint64
-	lastAppliedIndex uint64
-	matchIndex       []uint64
+	votefor          int32
+	currentTerm      int64
+	commitIndex      int64
+	lastAppliedIndex int64
+	matchIndex       []int64
 	nextIndex        nextIndex
 	log              *Log
 	//------------------------
-	id                   uint32
-	leader               uint32
+	id                   int32
+	leader               int32
 	context              interface{}
 	electionTimeout      *time.Timer
 	nodemap              nodeMap
@@ -110,16 +118,17 @@ type Server struct {
 	getAppendEntriesChan chan wrappedAppendRequest
 	// responseChan
 	//-------leader only------------
+	deposeChan  chan int64
 	commandChan chan wrappedCommand
 	//-----candidate only-----------
 	getVoteResponseChan chan wrappedVoteResponse
-	nodesVoteGranted    map[uint32]bool
+	nodesVoteGranted    map[int32]bool
 	//-----------------------------
 	mutexState
 }
 
 type wrappedVoteResponse struct {
-	id uint32
+	id int32
 	*RequestVoteResponse
 }
 
@@ -138,17 +147,12 @@ type wrappedVoteRequest struct {
 	responseChan chan *RequestVoteResponse
 }
 
-func randomElectionTimeout() time.Duration {
-	d := minTimeout + rand.Intn(maxTimeout-minTimeout)
-	return time.Duration(d) * time.Millisecond
-}
-
 func (s *Server) resetElectionTimeout() {
 	s.electionTimeout = time.NewTimer(randomElectionTimeout())
 }
 
 // NewServer can return a new server for clients
-func NewServer(id uint32, context interface{}, config *configuration) (s *Server) {
+func NewServer(id int32, context interface{}, config *configuration) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
@@ -215,7 +219,7 @@ func (s *Server) followerloop() {
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
 			resp := &RequestVoteResponse{
-				Term:        proto.Uint64(s.currentTerm),
+				Term:        proto.Int64(s.currentTerm),
 				VoteGranted: proto.Bool(false),
 			}
 			if s.votefor != notVotedYet {
@@ -235,12 +239,17 @@ func (s *Server) followerloop() {
 			appendRequest := wrappedAppendRequest.request
 			resp := s.handleAppendEntriesRequest(appendRequest)
 			wrappedAppendRequest.responseChan <- resp
+			if resp.GetSuccess() {
+				if err := s.log.setCommitIndex(appendRequest.GetCommitIndex()); err != nil {
+					logger.Printf("node %d set commit index error: %s", s.id, err.Error())
+				}
+			}
 		}
 	}
 }
 
 func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest) *AppendEntriesResponse {
-	resp := &AppendEntriesResponse{Term: proto.Uint64(s.currentTerm)}
+	resp := &AppendEntriesResponse{Term: proto.Int64(s.currentTerm)}
 	if s.currentTerm > appendRequest.GetTerm() {
 		resp.Success = proto.Bool(false)
 		return resp
@@ -256,7 +265,7 @@ func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest)
 
 // TODO: fill this.
 func (s *Server) candidateloop() {
-	s.nodesVoteGranted = make(map[uint32]bool)
+	s.nodesVoteGranted = make(map[int32]bool)
 	s.leader = noleader
 	s.currentTerm++ // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
@@ -287,6 +296,9 @@ func (s *Server) candidateloop() {
 				s.leader = s.id
 				return
 			}
+		case wrappedAppendRequest := <-s.getAppendEntriesChan:
+			// ????
+
 		}
 	}
 }
@@ -299,7 +311,20 @@ func (s *Server) stepDown() {
 
 // TODO: fill this.
 func (s *Server) leaderloop() {
-	// 记得初始化nextIndex
+	s.deposeChan = make(chan int64)
+	// initialize nextIndex
+	for id := range s.theOtherNodes() {
+		s.nextIndex.set(id, s.log.lastLogIndex())
+	}
+
+	heartBeat := time.NewTicker(hearbeatInterval())
+	defer heartBeat.Stop()
+	go func() {
+		for _ = range heartBeat.C {
+			s.broadcastHeartbeats()
+		}
+	}()
+
 	for s.getState() == leader {
 		select {
 		case wrappedCommand := <-s.commandChan:
@@ -310,28 +335,63 @@ func (s *Server) leaderloop() {
 			s.log.appendEntry(newEntry)
 			err = s.sendAppendEntries()
 			wrappedCommand.errChan <- err
-			if err == deponseError { // if leader has been deposed
+			if err == nil {
+				if e := s.log.setCommitIndex(s.log.lastLogIndex()); err != nil {
+					logger.Println(e.Error())
+				}
+			} else if err == deposeError { // if leader has been deposed
+				logger.Printf("node %d got deposed\n", s.id)
 				s.setState(follower)
 				return
+			} else {
+				logger.Println("append entries error: ", err.Error())
 			}
+		case responseTerm := <-s.deposeChan:
+			s.currentTerm = responseTerm
+			s.stepDown()
 		}
+
+	}
+}
+
+// TODO: refactor this
+func (s *Server) broadcastHeartbeats() {
+	theOtherNdoes := s.theOtherNodes()
+	for id, node := range theOtherNdoes {
+		go func() {
+			pbAER := AppendEntriesRequest{
+				LeaderID:     proto.Int32(s.id),
+				Term:         proto.Int64(s.currentTerm),
+				PrevLogIndex: proto.Int64(s.log.prevLogIndex(s.nextIndex.get(id))),
+				PrevLogTerm:  proto.Int64(s.log.prevLogTerm(s.nextIndex.get(id))),
+				CommitIndex:  proto.Int64(s.log.commitIndex),
+				Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
+			}
+			reponse, err := node.rpcAppendEntries(s, &pbAER)
+			if err != nil {
+				logger.Println(err.Error())
+			}
+			if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
+				s.deposeChan <- rTerm
+			}
+		}()
 	}
 }
 
 // TODO: add more procedure
 func (s *Server) sendAppendEntries() error {
 	theOtherNodes := s.theOtherNodes()
-	successChan := make(chan bool, len(theOtherNodes))
+	successChan := make(chan struct{}, len(theOtherNodes))
 	errChan := make(chan error, len(theOtherNodes))
 	for id, node := range theOtherNodes {
 		go func() {
 			for {
 				pbAER := AppendEntriesRequest{
-					LeaderID:     proto.Uint32(s.id),
-					Term:         proto.Uint64(s.currentTerm),
-					PrevLogIndex: proto.Uint64(s.log.prevLogIndex(s.nextIndex.get(id))),
-					PrevLogTerm:  proto.Uint64(s.log.prevLogTerm(s.nextIndex.get(id))),
-					CommitIndex:  proto.Uint64(s.log.commitIndex),
+					LeaderID:     proto.Int32(s.id),
+					Term:         proto.Int64(s.currentTerm),
+					PrevLogIndex: proto.Int64(s.log.prevLogIndex(s.nextIndex.get(id))),
+					PrevLogTerm:  proto.Int64(s.log.prevLogTerm(s.nextIndex.get(id))),
+					CommitIndex:  proto.Int64(s.log.commitIndex),
 					Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
 				}
 				reponse, err := node.rpcAppendEntries(s, &pbAER)
@@ -339,7 +399,7 @@ func (s *Server) sendAppendEntries() error {
 					continue
 				}
 				if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
-					errChan <- deponseError
+					errChan <- deposeError
 					return
 				}
 				if !reponse.GetSuccess() {
@@ -350,7 +410,7 @@ func (s *Server) sendAppendEntries() error {
 				}
 				logger.Printf("node %d append entries succeedded\n", id)
 				s.nextIndex.inc(id)
-				successChan <- true
+				successChan <- struct{}{}
 				return
 			}
 		}()
@@ -378,21 +438,21 @@ func (s *Server) sendAppendEntries() error {
 }
 
 func (s *Server) theOtherNodes() nodeMap {
-	allNodeMap := make(nodeMap)
+	nMap := make(nodeMap)
 	for id, node := range s.config.c_NewNode {
 		if id == s.id {
 			continue
 		}
-		allNodeMap[id] = node
+		nMap[id] = node
 	}
 
 	for id, node := range s.config.c_OldNode {
 		if id == s.id {
 			continue
 		}
-		allNodeMap[id] = node
+		nMap[id] = node
 	}
-	return allNodeMap
+	return nMap
 }
 
 // Exec executes client's command. client should
@@ -433,10 +493,10 @@ func (s *Server) requestVotes() {
 		go func() { // send vote request simultaneously
 			for !responded { // not responded, keep trying
 				pb := &RequestVoteRequest{
-					CandidateID:  proto.Uint32(s.id),
-					Term:         proto.Uint64(s.currentTerm),
-					LastLogIndex: proto.Uint64(s.log.lastLogIndex()),
-					LastLogTerm:  proto.Uint64(s.log.lastLogTerm()),
+					CandidateID:  proto.Int32(s.id),
+					Term:         proto.Int64(s.currentTerm),
+					LastLogIndex: proto.Int64(s.log.lastLogIndex()),
+					LastLogTerm:  proto.Int64(s.log.lastLogTerm()),
 				}
 				responseProto, err := node.rpcRequestVote(s, pb)
 				if err != nil {

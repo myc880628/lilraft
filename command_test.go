@@ -1,18 +1,18 @@
 package lilraft
 
 var (
-	sNum uint64 = 0
+	sNum int64 = 0
 )
 
 type testCommand struct {
-	serialNum uint64
+	serialNum int64
 }
 
 func (t *testCommand) Name() string {
 	return "test"
 }
 
-func (t *testCommand) SerialNum() uint64 {
+func (t *testCommand) SerialNum() int64 {
 	return t.serialNum
 }
 
