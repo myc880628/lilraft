@@ -195,6 +195,7 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 		voted:                false,
 		config:               config,
 		nodemap:              make(nodeMap),
+		nextIndex:            nextIndex{m: make(map[int32]int64)},
 		commandChan:          make(chan wrappedCommand),
 		getVoteRequestChan:   make(chan wrappedVoteRequest),
 		getAppendEntriesChan: make(chan wrappedAppendRequest),
@@ -211,7 +212,7 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 
 // Start starts a server, remember to call NewServer before call this.
 func (s *Server) Start() {
-	s.setState(follower)
+	s.setState(follower) // all servers start as follower
 	go s.loop()
 }
 
@@ -242,20 +243,14 @@ func (s *Server) followerloop() {
 			return
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
-			resp := s.handleVoteRequest(voteRequest)
-			wrappedVoteRequest.responseChan <- resp
+			wrappedVoteRequest.responseChan <- s.handleVoteRequest(voteRequest)
 		case wrappedAppendRequest := <-s.getAppendEntriesChan:
 			appendRequest := wrappedAppendRequest.request
-			if s.leader == noleader {
-				s.leader = appendRequest.GetLeaderID()
-			}
-			resp := s.handleAppendEntriesRequest(appendRequest)
-			wrappedAppendRequest.responseChan <- resp
+			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		}
 	}
 }
 
-// TODO: fill this.
 func (s *Server) candidateloop() {
 	s.nodesVoteGranted = make(map[int32]bool)
 	s.leader = noleader
@@ -269,8 +264,8 @@ func (s *Server) candidateloop() {
 			// Candidate timeouts and start a new election
 			return
 		case resp := <-s.getVoteResponseChan:
-			if rTerm := resp.GetTerm(); rTerm > s.currentTerm {
-				s.currentTerm = rTerm
+			if resp.GetTerm() > s.currentTerm {
+				s.currentTerm = resp.GetTerm()
 				s.stepDown()
 				return
 			}
@@ -293,16 +288,26 @@ func (s *Server) candidateloop() {
 			if voteRequest.GetTerm() > s.currentTerm {
 				s.voted = false // candidate has voted for itself, we need to change that
 				s.stepDown()
+				// candidate become follower
+				wrappedVoteRequest.responseChan <- s.handleVoteRequest(voteRequest)
+				return
 			}
-			// now candidate stepped down and become follower
-			wrappedVoteRequest.responseChan <- s.handleVoteRequest(voteRequest)
+			// candidate does not step down
+			wrappedVoteRequest.responseChan <- &RequestVoteResponse{
+				Term:        proto.Int64(s.currentTerm),
+				VoteGranted: proto.Bool(false),
+			}
 		case wrappedAppendRequest := <-s.getAppendEntriesChan:
 			appendRequest := wrappedAppendRequest.request
-			if appendRequest.GetTerm() > s.currentTerm {
+			if appendRequest.GetTerm() >= s.currentTerm {
 				s.stepDown()
+				wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
+				return
 			}
-			// now candidate stepped down and become follower
-			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
+			wrappedAppendRequest.responseChan <- &AppendEntriesResponse{
+				Term:    proto.Int64(s.currentTerm),
+				Success: proto.Bool(false),
+			}
 		}
 	}
 }
@@ -371,7 +376,7 @@ func (s *Server) broadcastHeartbeats() {
 	theOtherNdoes := s.theOtherNodes()
 	// logLen := len(s.log.entries)
 	for id, node := range theOtherNdoes {
-		go func() {
+		go func(id int32, node Node) {
 			pbAER := AppendEntriesRequest{
 				LeaderID:     proto.Int32(s.id),
 				Term:         proto.Int64(s.currentTerm),
@@ -390,7 +395,7 @@ func (s *Server) broadcastHeartbeats() {
 			if response.GetSuccess() {
 				s.nextIndex.set(id, s.log.lastLogIndex())
 			}
-		}()
+		}(id, node)
 	}
 }
 
@@ -400,7 +405,7 @@ func (s *Server) sendAppendEntries() error {
 	successChan := make(chan struct{}, len(theOtherNodes))
 	errChan := make(chan error, len(theOtherNodes))
 	for id, node := range theOtherNodes {
-		go func() {
+		go func(id int32, node Node) {
 			for {
 				pbAER := AppendEntriesRequest{
 					LeaderID:     proto.Int32(s.id),
@@ -430,7 +435,7 @@ func (s *Server) sendAppendEntries() error {
 				successChan <- struct{}{}
 				return
 			}
-		}()
+		}(id, node)
 	}
 	successCount := 0
 	go func() {
@@ -490,8 +495,12 @@ func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest)
 	if s.log.contains(appendRequest.GetPrevLogIndex(), appendRequest.GetPrevLogTerm()) {
 		s.log.appendEntries(appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
 		resp.Success = proto.Bool(true)
-	} else {
-		resp.Success = proto.Bool(false)
+
+		if s.leader == noleader {
+			s.leader = appendRequest.GetLeaderID()
+		}
+
+		s.resetElectionTimeout()
 	}
 	return resp
 }
@@ -501,16 +510,16 @@ func (s *Server) handleVoteRequest(voteRequest *RequestVoteRequest) *RequestVote
 		Term:        proto.Int64(s.currentTerm),
 		VoteGranted: proto.Bool(false),
 	}
-	if s.voted == true {
+	if s.voted == true { // follower vote exactly once on one specific term
 		return resp
-	} else if s.currentTerm > voteRequest.GetTerm() {
+	} else if s.currentTerm >= voteRequest.GetTerm() {
 		return resp
-	} else if voteRequest.GetLastLogTerm() > s.log.lastLogTerm() {
+	} else if voteRequest.GetLastLogTerm() >= s.log.lastLogTerm() && voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
+		// candidate's log is at leat up-to-date as Server s.
+		// logger.Printf("node %d get vote")
 		resp.VoteGranted = proto.Bool(true)
-	} else if voteRequest.GetLastLogTerm() == s.log.lastLogTerm() && voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
-		resp.VoteGranted = proto.Bool(true)
+		s.voted = true
 	}
-	s.voted = true
 	return resp
 }
 
@@ -524,9 +533,9 @@ func (s *Server) requestVotes() {
 	// if re-relect, reset the voteChan
 	s.getVoteResponseChan = make(chan wrappedVoteResponse, len(theOtherNodes))
 	for id, node := range theOtherNodes {
-		responded := false
-		go func() { // send vote request simultaneously
-			for !responded { // not responded, keep trying
+		go func(id int32, node Node) { // send vote request simultaneously
+			for { // not responded, keep trying
+				logger.Printf("node %d send to node %d\n", s.id, id)
 				pb := &RequestVoteRequest{
 					CandidateID:  proto.Int32(s.id),
 					Term:         proto.Int64(s.currentTerm),
@@ -534,19 +543,21 @@ func (s *Server) requestVotes() {
 					LastLogTerm:  proto.Int64(s.log.lastLogTerm()),
 				}
 				responseProto, err := node.rpcRequestVote(s, pb)
-				if err != nil {
-					// logger.Println("vote response error:", err.Error())
-					responded = false
-					// does not timeout and try to send request over and over agian
-					continue
+				if err == nil {
+					if responseProto.GetVoteGranted() {
+						logger.Printf("node %d got node %d granted\n", s.id, id)
+					} else {
+						logger.Printf("node %d got node %d reject\n", s.id, id)
+					}
+					s.getVoteResponseChan <- wrappedVoteResponse{
+						id:                  id,
+						RequestVoteResponse: responseProto,
+					}
+					return
 				}
-				responded = true
-				s.getVoteResponseChan <- wrappedVoteResponse{
-					id:                  id,
-					RequestVoteResponse: responseProto,
-				}
+				logger.Println("vote response error:", err.Error())
 			}
-		}()
+		}(id, node)
 	}
 }
 
@@ -588,4 +599,5 @@ func (s *Server) electionPass() bool {
 func (s *Server) stepDown() {
 	s.setState(follower)
 	s.leader = noleader
+	logger.Printf("node %d step down to follower\n", s.id)
 }

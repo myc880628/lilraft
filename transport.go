@@ -31,11 +31,10 @@ func idHandleFunc(s *Server) http.HandlerFunc {
 	}
 }
 
-// TODO: fill this func
 func appendEntriesHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		logger.Println("node %d: append entries in comming!", s.id)
+		logger.Printf("node %d: append entries in comming!\n", s.id)
 		appendEntriesRequest := &AppendEntriesRequest{}
 		if err := Decode(r.Body, appendEntriesRequest); err != nil {
 			logger.Println("Decode appendEntriesRequest err: ", err.Error())
@@ -52,15 +51,19 @@ func appendEntriesHandler(s *Server) http.HandlerFunc {
 	}
 }
 
-// TODO: fill this func
 func requestVoteHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		logger.Println("node %d: Vote Request in comming!", s.id)
 		voteRequest := &RequestVoteRequest{}
 		if err := Decode(r.Body, voteRequest); err != nil {
 			logger.Println("decode voteRequest error: ", err.Error())
 		}
+		logger.Printf("node %d: Vote Request in comming! node %d term %d asks for vote, lastLogIndex %d, lastLogTerm %d",
+			s.id, voteRequest.GetCandidateID(),
+			voteRequest.GetTerm(),
+			voteRequest.GetLastLogIndex(),
+			voteRequest.GetLastLogTerm(),
+		)
 		respChan := make(chan *RequestVoteResponse)
 		s.getVoteRequestChan <- wrappedVoteRequest{
 			request:      voteRequest,

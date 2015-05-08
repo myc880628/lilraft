@@ -114,8 +114,11 @@ func (log *Log) appendEntry(logEntry *LogEntry) {
 func (log *Log) appendEntries(index int64, logEntries []*LogEntry) {
 	log.Lock()
 	defer log.Unlock()
-	startIndex := log.startIndex()
-	log.entries = append(log.entries[:(index-startIndex)+1], logEntries...)
+	if len(log.entries) == 0 {
+		log.entries = logEntries
+		return
+	}
+	log.entries = append(log.entries[:(index-log.startIndex())+1], logEntries...)
 }
 
 func (log *Log) newLogEntry(term int64, command Command) (*LogEntry, error) {
