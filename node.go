@@ -39,6 +39,9 @@ func NewHTTPNode(id int32, rawurl string) (httpNode *HTTPNode) {
 	if err != nil {
 		panic(err)
 	}
+	if id <= 0 {
+		panic("node id should be > 0")
+	}
 	u.Path = ""
 	logger.Printf("node url: %s\n", u.String())
 	return &HTTPNode{

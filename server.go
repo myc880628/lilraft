@@ -99,7 +99,7 @@ func (ni *nextIndex) dec(id int32) {
 // Server is a concrete machine that process command, appendentries and requestvote, etc.
 type Server struct {
 	//----from the paper------
-	votefor          int32
+	voted            bool
 	currentTerm      int64
 	commitIndex      int64
 	lastAppliedIndex int64
@@ -151,12 +151,36 @@ func (s *Server) resetElectionTimeout() {
 	s.electionTimeout = time.NewTimer(randomElectionTimeout())
 }
 
+// Exec executes client's command. client should
+// use concrete and registered commands that
+// implement Command interface
+func (s *Server) Exec(command Command) error {
+	errChan := make(chan error)
+	s.commandChan <- wrappedCommand{
+		errChan: errChan,
+		command: command,
+	}
+	return <-errChan
+}
+
+// RegisterCommand registers client's commands that
+// implement Command interface. Only registered commands
+// can be decoded and executed by other nodes.
+func (s *Server) RegisterCommand(command Command) {
+	if command == nil {
+		panic("lilraft: Command cannot be nil")
+	} else if commandType[command.Name()] != nil {
+		panic("lilraft: Command exists!")
+	}
+	commandType[command.Name()] = command
+}
+
 // NewServer can return a new server for clients
 func NewServer(id int32, context interface{}, config *configuration) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
-	if id == 0 { // HINT: id可以在之后作为投票的标记
+	if id <= 0 {
 		panic("lilraft: id must be > 0")
 	}
 	if config == nil {
@@ -168,7 +192,7 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 		context:              context,
 		currentTerm:          0,
 		log:                  newLog(),
-		votefor:              0,
+		voted:                false,
 		config:               config,
 		nodemap:              make(nodeMap),
 		commandChan:          make(chan wrappedCommand),
@@ -218,49 +242,17 @@ func (s *Server) followerloop() {
 			return
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
-			resp := &RequestVoteResponse{
-				Term:        proto.Int64(s.currentTerm),
-				VoteGranted: proto.Bool(false),
-			}
-			if s.votefor != notVotedYet {
-				resp.VoteGranted = proto.Bool(false)
-			} else if s.currentTerm > voteRequest.GetTerm() {
-				resp.VoteGranted = proto.Bool(false)
-			} else if voteRequest.GetLastLogTerm() > s.log.lastLogTerm() {
-				s.votefor = voteRequest.GetCandidateID()
-				resp.VoteGranted = proto.Bool(true)
-			} else if voteRequest.GetLastLogTerm() == s.log.lastLogTerm() &&
-				voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
-				s.votefor = voteRequest.GetCandidateID() // 更新term的时候再将votefor更新为notVotedYet
-				resp.VoteGranted = proto.Bool(true)
-			}
+			resp := s.handleVoteRequest(voteRequest)
 			wrappedVoteRequest.responseChan <- resp
 		case wrappedAppendRequest := <-s.getAppendEntriesChan:
 			appendRequest := wrappedAppendRequest.request
+			if s.leader == noleader {
+				s.leader = appendRequest.GetLeaderID()
+			}
 			resp := s.handleAppendEntriesRequest(appendRequest)
 			wrappedAppendRequest.responseChan <- resp
-			if resp.GetSuccess() {
-				if err := s.log.setCommitIndex(appendRequest.GetCommitIndex()); err != nil {
-					logger.Printf("node %d set commit index error: %s", s.id, err.Error())
-				}
-			}
 		}
 	}
-}
-
-func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest) *AppendEntriesResponse {
-	resp := &AppendEntriesResponse{Term: proto.Int64(s.currentTerm)}
-	if s.currentTerm > appendRequest.GetTerm() {
-		resp.Success = proto.Bool(false)
-		return resp
-	}
-	if s.log.contains(appendRequest.GetPrevLogIndex(), appendRequest.GetPrevLogTerm()) {
-		s.log.appendEntries(appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
-		resp.Success = proto.Bool(true)
-	} else {
-		resp.Success = proto.Bool(false)
-	}
-	return resp
 }
 
 // TODO: fill this.
@@ -292,36 +284,44 @@ func (s *Server) candidateloop() {
 				}
 				logger.Printf("node %d became leader\n", s.id)
 				s.setState(leader)
-				s.votefor = notVotedYet
+				s.voted = false
 				s.leader = s.id
 				return
 			}
+		case wrappedVoteRequest := <-s.getVoteRequestChan:
+			voteRequest := wrappedVoteRequest.request
+			if voteRequest.GetTerm() > s.currentTerm {
+				s.voted = false // candidate has voted for itself, we need to change that
+				s.stepDown()
+			}
+			// now candidate stepped down and become follower
+			wrappedVoteRequest.responseChan <- s.handleVoteRequest(voteRequest)
 		case wrappedAppendRequest := <-s.getAppendEntriesChan:
-			// ????
-
+			appendRequest := wrappedAppendRequest.request
+			if appendRequest.GetTerm() > s.currentTerm {
+				s.stepDown()
+			}
+			// now candidate stepped down and become follower
+			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		}
 	}
 }
 
-// TODO: fill this
-func (s *Server) stepDown() {
-	s.setState(follower)
-	s.votefor = notVotedYet
-}
-
 // TODO: fill this.
 func (s *Server) leaderloop() {
-	s.deposeChan = make(chan int64)
+	theOtherNdoes := s.theOtherNodes()
+	s.deposeChan = make(chan int64, len(theOtherNdoes))
 	// initialize nextIndex
-	for id := range s.theOtherNodes() {
+	for id := range theOtherNdoes {
 		s.nextIndex.set(id, s.log.lastLogIndex())
 	}
-
+	hearbeatChan := make(chan struct{})
 	heartBeat := time.NewTicker(hearbeatInterval())
 	defer heartBeat.Stop()
 	go func() {
 		for _ = range heartBeat.C {
-			s.broadcastHeartbeats()
+			// s.broadcastHeartbeats()
+			hearbeatChan <- struct{}{}
 		}
 	}()
 
@@ -334,29 +334,42 @@ func (s *Server) leaderloop() {
 			}
 			s.log.appendEntry(newEntry)
 			err = s.sendAppendEntries()
-			wrappedCommand.errChan <- err
 			if err == nil {
-				if e := s.log.setCommitIndex(s.log.lastLogIndex()); err != nil {
-					logger.Println(e.Error())
-				}
+				wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex())
+				continue
 			} else if err == deposeError { // if leader has been deposed
-				logger.Printf("node %d got deposed\n", s.id)
 				s.setState(follower)
-				return
 			} else {
 				logger.Println("append entries error: ", err.Error())
 			}
+			wrappedCommand.errChan <- err
+		case wrappedVoteRequest := <-s.getVoteRequestChan:
+			voteRequest := wrappedVoteRequest.request
+			if voteRequest.GetTerm() > s.currentTerm {
+				s.stepDown()
+			}
+			// now leader stepped down and become follower
+			wrappedVoteRequest.responseChan <- s.handleVoteRequest(voteRequest)
+		case wrappedAppendRequest := <-s.getAppendEntriesChan:
+			appendRequest := wrappedAppendRequest.request
+			if appendRequest.GetTerm() > s.currentTerm {
+				s.stepDown()
+			}
+			// now leader stepped down and become follower
+			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		case responseTerm := <-s.deposeChan:
 			s.currentTerm = responseTerm
 			s.stepDown()
+		case <-hearbeatChan:
+			s.broadcastHeartbeats()
 		}
-
 	}
 }
 
 // TODO: refactor this
 func (s *Server) broadcastHeartbeats() {
 	theOtherNdoes := s.theOtherNodes()
+	// logLen := len(s.log.entries)
 	for id, node := range theOtherNdoes {
 		go func() {
 			pbAER := AppendEntriesRequest{
@@ -367,12 +380,15 @@ func (s *Server) broadcastHeartbeats() {
 				CommitIndex:  proto.Int64(s.log.commitIndex),
 				Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
 			}
-			reponse, err := node.rpcAppendEntries(s, &pbAER)
+			response, err := node.rpcAppendEntries(s, &pbAER)
 			if err != nil {
 				logger.Println(err.Error())
 			}
-			if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
+			if rTerm := response.GetTerm(); rTerm > s.currentTerm {
 				s.deposeChan <- rTerm
+			}
+			if response.GetSuccess() {
+				s.nextIndex.set(id, s.log.lastLogIndex())
 			}
 		}()
 	}
@@ -400,6 +416,7 @@ func (s *Server) sendAppendEntries() error {
 				}
 				if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
 					errChan <- deposeError
+					s.deposeChan <- rTerm // leader stale
 					return
 				}
 				if !reponse.GetSuccess() {
@@ -409,7 +426,7 @@ func (s *Server) sendAppendEntries() error {
 					continue
 				}
 				logger.Printf("node %d append entries succeedded\n", id)
-				s.nextIndex.inc(id)
+				s.nextIndex.set(id, s.log.lastLogIndex())
 				successChan <- struct{}{}
 				return
 			}
@@ -422,7 +439,7 @@ func (s *Server) sendAppendEntries() error {
 			case <-successChan:
 				successCount++
 				if successCount == len(theOtherNodes)/2 {
-					// PAPER: Agreement(forelectionsandentrycommitment)requires
+					// PAPER: Agreement(for elections and entry commitment)requires
 					// separate majorities from both the old and new
 					// configurations.
 					// so this needs to be changed later
@@ -455,32 +472,50 @@ func (s *Server) theOtherNodes() nodeMap {
 	return nMap
 }
 
-// Exec executes client's command. client should
-// use concrete and registered commands that
-// implement Command interface
-func (s *Server) Exec(command Command) error {
-	errChan := make(chan error)
-	s.commandChan <- wrappedCommand{
-		errChan: errChan,
-		command: command,
-	}
-	return <-errChan
+func (s *Server) updateCurrentTerm(term int64) {
+	s.currentTerm = term
+	s.voted = false // follower vote exactly once on one specific term
 }
 
-// RegisterCommand registers client's commands that
-// implement Command interface. Only registered commands
-// can be decoded and executed by other nodes.
-func (s *Server) RegisterCommand(command Command) {
-	if command == nil {
-		panic("lilraft: Command cannot be nil")
-	} else if commandType[command.Name()] != nil {
-		panic("lilraft: Command exists!")
+func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest) *AppendEntriesResponse {
+	resp := &AppendEntriesResponse{
+		Term:    proto.Int64(s.currentTerm),
+		Success: proto.Bool(false)}
+	if s.currentTerm > appendRequest.GetTerm() {
+		return resp
 	}
-	commandType[command.Name()] = command
+	if s.currentTerm < appendRequest.GetTerm() {
+		s.updateCurrentTerm(appendRequest.GetTerm())
+	}
+	if s.log.contains(appendRequest.GetPrevLogIndex(), appendRequest.GetPrevLogTerm()) {
+		s.log.appendEntries(appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
+		resp.Success = proto.Bool(true)
+	} else {
+		resp.Success = proto.Bool(false)
+	}
+	return resp
+}
+
+func (s *Server) handleVoteRequest(voteRequest *RequestVoteRequest) *RequestVoteResponse {
+	resp := &RequestVoteResponse{
+		Term:        proto.Int64(s.currentTerm),
+		VoteGranted: proto.Bool(false),
+	}
+	if s.voted == true {
+		return resp
+	} else if s.currentTerm > voteRequest.GetTerm() {
+		return resp
+	} else if voteRequest.GetLastLogTerm() > s.log.lastLogTerm() {
+		resp.VoteGranted = proto.Bool(true)
+	} else if voteRequest.GetLastLogTerm() == s.log.lastLogTerm() && voteRequest.GetLastLogIndex() >= s.log.lastLogIndex() {
+		resp.VoteGranted = proto.Bool(true)
+	}
+	s.voted = true
+	return resp
 }
 
 func (s *Server) voteForItself() {
-	s.votefor = s.id
+	s.voted = true
 	s.nodesVoteGranted[s.id] = true
 }
 
@@ -539,12 +574,18 @@ func (s *Server) electionPass() bool {
 				voteCountOldNew++
 			}
 		}
-		if voteCountOld >= len(s.config.c_OldNode)/2+1 &&
-			voteCountOldNew >= len(s.config.c_NewNode)/2+1 {
+		if voteCountOld >= len(s.config.c_OldNode)/2+1 && voteCountOldNew >= len(s.config.c_NewNode)/2+1 {
+			// if pass both old and new config
 			return true
 		}
 	} else {
 		panic("lilraft: config state unknown")
 	}
 	return false
+}
+
+// candidate or leader will call this if they detect legit leader
+func (s *Server) stepDown() {
+	s.setState(follower)
+	s.leader = noleader
 }
