@@ -32,3 +32,8 @@ message RequestVoteResponse {
         required int64 Term=1;
         required bool VoteGranted=2;
 }
+
+message RedirectedCommand {
+        required string CommandName=1;
+        required bytes Command=2;
+}

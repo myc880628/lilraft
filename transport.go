@@ -34,11 +34,12 @@ func idHandleFunc(s *Server) http.HandlerFunc {
 func appendEntriesHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		logger.Printf("node %d: append entries in comming!\n", s.id)
 		appendEntriesRequest := &AppendEntriesRequest{}
 		if err := Decode(r.Body, appendEntriesRequest); err != nil {
-			logger.Println("Decode appendEntriesRequest err: ", err.Error())
+			logger.Printf("node %d decode appendEntriesRequest err: %s \n", s.id, err.Error())
+			return
 		}
+		logger.Printf("node %d: append entries in comming!", s.id)
 		respChan := make(chan *AppendEntriesResponse)
 		s.getAppendEntriesChan <- wrappedAppendRequest{
 			request:      appendEntriesRequest,
@@ -56,7 +57,8 @@ func requestVoteHandler(s *Server) http.HandlerFunc {
 		defer r.Body.Close()
 		voteRequest := &RequestVoteRequest{}
 		if err := Decode(r.Body, voteRequest); err != nil {
-			logger.Println("decode voteRequest error: ", err.Error())
+			logger.Printf("node %d decode voteRequest error: %s\n", s.id, err.Error())
+			return
 		}
 		logger.Printf("node %d: Vote Request in comming! node %d term %d asks for vote, lastLogIndex %d, lastLogTerm %d",
 			s.id, voteRequest.GetCandidateID(),
@@ -79,7 +81,24 @@ func requestVoteHandler(s *Server) http.HandlerFunc {
 // TODO: fill this func
 func commandHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		defer r.Body.Close()
+		rCommand := &RedirectedCommand{}
+		if err := Decode(r.Body, rCommand); err != nil {
+			logger.Printf("node %d decode voteRequest error: %s\n", s.id, err.Error())
+			return
+		}
+		logger.Println("node ", s.id, " get command")
+		command, err := newCommand(rCommand.GetCommandName(), rCommand.GetCommand())
+		if err != nil {
+			logger.Printf("node %d generate new command error: %s\n", s.id, err.Error())
+			return
+		}
+		err = s.Exec(command)
+		if err != nil {
+			w.Write([]byte("failed"))
+			return
+		}
+		w.Write([]byte("success"))
 	}
 }
 

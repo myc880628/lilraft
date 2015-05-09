@@ -1,6 +1,8 @@
 package lilraft
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -16,7 +18,10 @@ import (
 var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
 
 // Error
-var deposeError = fmt.Errorf("leader got deposed")
+var (
+	deposeError   = fmt.Errorf("leader got deposed")
+	noLeaderError = fmt.Errorf("cannot find leader")
+)
 
 // state constant
 const (
@@ -24,10 +29,10 @@ const (
 	candidate
 	leader
 	stopped
+	noleader
+	c_old
+	c_old_new
 )
-
-const noleader = 0
-const notVotedYet = 0
 
 var (
 	minTimeout = 150            // minimum timeout: 150 ms
@@ -101,7 +106,6 @@ type Server struct {
 	//----from the paper------
 	voted            bool
 	currentTerm      int64
-	commitIndex      int64
 	lastAppliedIndex int64
 	matchIndex       []int64
 	nextIndex        nextIndex
@@ -111,7 +115,6 @@ type Server struct {
 	leader               int32
 	context              interface{}
 	electionTimeout      *time.Timer
-	nodemap              nodeMap
 	httpClient           http.Client
 	config               *configuration
 	getVoteRequestChan   chan wrappedVoteRequest
@@ -156,6 +159,7 @@ func (s *Server) resetElectionTimeout() {
 // implement Command interface
 func (s *Server) Exec(command Command) error {
 	errChan := make(chan error)
+	logger.Println(command)
 	s.commandChan <- wrappedCommand{
 		errChan: errChan,
 		command: command,
@@ -194,7 +198,6 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 		log:                  newLog(),
 		voted:                false,
 		config:               config,
-		nodemap:              make(nodeMap),
 		nextIndex:            nextIndex{m: make(map[int32]int64)},
 		commandChan:          make(chan wrappedCommand),
 		getVoteRequestChan:   make(chan wrappedVoteRequest),
@@ -216,6 +219,10 @@ func (s *Server) Start() {
 	go s.loop()
 }
 
+func (s *Server) Stop() {
+	s.setState(stopped)
+}
+
 func (s *Server) loop() {
 	for {
 		switch s.getState() {
@@ -226,7 +233,7 @@ func (s *Server) loop() {
 		case leader:
 			s.leaderloop()
 		case stopped:
-			break
+			return
 		default:
 			panic("lilraft: impossible state")
 		}
@@ -247,8 +254,27 @@ func (s *Server) followerloop() {
 		case wrappedAppendRequest := <-s.getAppendEntriesChan:
 			appendRequest := wrappedAppendRequest.request
 			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
+		case wrappedCommand := <-s.commandChan:
+			wrappedCommand.errChan <- s.redirectClient(wrappedCommand.command)
 		}
 	}
+}
+
+// TODO: fill this
+func (s *Server) redirectClient(command Command) error {
+	if s.leader == noleader {
+		return noLeaderError
+	}
+	logger.Printf("node %d redirecting client to node %d", s.id, s.leader)
+	var bytesBuffer bytes.Buffer
+	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
+		return err
+	}
+	redirectedCommand := &RedirectedCommand{
+		CommandName: proto.String(command.Name()),
+		Command:     bytesBuffer.Bytes(),
+	}
+	return s.theOtherNodes()[s.leader].rpcCommand(s, redirectedCommand)
 }
 
 func (s *Server) candidateloop() {
@@ -343,7 +369,7 @@ func (s *Server) leaderloop() {
 				wrappedCommand.errChan <- err
 				continue
 			}
-			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex())
+			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex(), s.context)
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
 			if voteRequest.GetTerm() > s.currentTerm {
@@ -490,6 +516,10 @@ func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest)
 
 		if s.leader == noleader {
 			s.leader = appendRequest.GetLeaderID()
+		}
+
+		if appendRequest.GetCommitIndex() > s.log.commitIndex {
+			s.log.setCommitIndex(appendRequest.GetCommitIndex(), s.context)
 		}
 
 		s.resetElectionTimeout()

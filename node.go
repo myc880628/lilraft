@@ -15,6 +15,7 @@ type Node interface {
 	id() int32
 	rpcAppendEntries(*Server, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	rpcRequestVote(*Server, *RequestVoteRequest) (*RequestVoteResponse, error)
+	rpcCommand(*Server, *RedirectedCommand) error // followers or candidates use this to redirect client's commands to leader
 }
 
 // nodeMap wraps some useful function with a map
@@ -90,6 +91,34 @@ func (node *HTTPNode) rpcAppendEntries(server *Server, aer *AppendEntriesRequest
 		return nil, err
 	}
 	return responseProto, nil
+}
+
+type httpCommand struct {
+	// http transport needs command's name to decode command
+	// to a specific type of command, so I wrapped command
+	// with command's name
+	name    string
+	command Command
+}
+
+func (node *HTTPNode) rpcCommand(server *Server, rCommand *RedirectedCommand) error {
+	var bytesBuffer bytes.Buffer
+	if err := Encode(&bytesBuffer, rCommand); err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s%s", node.URL.String(), commandPath)
+	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
+	if err != nil {
+		return err
+	}
+	var resp []byte
+	if _, err := httpResponse.Body.Read(resp); err != nil {
+		return err
+	}
+	if string(resp) == "failed" {
+		return fmt.Errorf("node %d exec command failed", node.id())
+	}
+	return nil
 }
 
 func Decode(body io.Reader, pb proto.Message) error {

@@ -14,6 +14,7 @@ It has these top-level messages:
 	AppendEntriesResponse
 	RequestVoteRequest
 	RequestVoteResponse
+	RedirectedCommand
 */
 package lilraft
 
@@ -206,6 +207,30 @@ func (m *RequestVoteResponse) GetVoteGranted() bool {
 		return *m.VoteGranted
 	}
 	return false
+}
+
+type RedirectedCommand struct {
+	CommandName      *string `protobuf:"bytes,1,req" json:"CommandName,omitempty"`
+	Command          []byte  `protobuf:"bytes,2,req" json:"Command,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *RedirectedCommand) Reset()         { *m = RedirectedCommand{} }
+func (m *RedirectedCommand) String() string { return proto.CompactTextString(m) }
+func (*RedirectedCommand) ProtoMessage()    {}
+
+func (m *RedirectedCommand) GetCommandName() string {
+	if m != nil && m.CommandName != nil {
+		return *m.CommandName
+	}
+	return ""
+}
+
+func (m *RedirectedCommand) GetCommand() []byte {
+	if m != nil {
+		return m.Command
+	}
+	return nil
 }
 
 func init() {

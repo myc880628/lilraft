@@ -1,11 +1,8 @@
 package lilraft
 
-var (
-	sNum int64 = 0
-)
-
 type testCommand struct {
-	serialNum int64
+	Serial int64 // Use capital to be encoded and decoded by json package
+	Val    int
 }
 
 func (t *testCommand) Name() string {
@@ -13,16 +10,18 @@ func (t *testCommand) Name() string {
 }
 
 func (t *testCommand) SerialNum() int64 {
-	return t.serialNum
+	return t.Serial
 }
 
-func (t *testCommand) Apply() {
-	println("hello lilraft")
+func (t *testCommand) Apply(context interface{}) {
+	sl := context.(*[]int)
+	logger.Printf("array appended %d\n", t.Val)
+	*sl = append(*sl, t.Val)
 }
 
-func newTestCommand() *testCommand {
-	sNum++
+func newTestCommand(sNum int64, val int) *testCommand {
 	return &testCommand{
-		serialNum: sNum,
+		Serial: sNum,
+		Val:    val,
 	}
 }

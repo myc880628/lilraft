@@ -26,7 +26,7 @@ func newLog() (l *Log) {
 }
 
 // TODO: add more procedure
-func (log *Log) setCommitIndex(commitIndex int64) error {
+func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 	log.Lock()
 	defer log.Unlock()
 	startIndex := log.startIndex()
@@ -40,7 +40,7 @@ func (log *Log) setCommitIndex(commitIndex int64) error {
 		if err != nil {
 			return err
 		}
-		command.Apply()
+		command.Apply(context)
 	}
 	log.commitIndex = commitIndex
 	return nil
