@@ -265,7 +265,7 @@ func (s *Server) candidateloop() {
 			return
 		case resp := <-s.getVoteResponseChan:
 			if resp.GetTerm() > s.currentTerm {
-				s.currentTerm = resp.GetTerm()
+				s.updateCurrentTerm(resp.GetTerm())
 				s.stepDown()
 				return
 			}
@@ -312,7 +312,6 @@ func (s *Server) candidateloop() {
 	}
 }
 
-// TODO: fill this.
 func (s *Server) leaderloop() {
 	theOtherNdoes := s.theOtherNodes()
 	s.deposeChan = make(chan int64, len(theOtherNdoes))
@@ -339,15 +338,12 @@ func (s *Server) leaderloop() {
 			}
 			s.log.appendEntry(newEntry)
 			err = s.sendAppendEntries()
-			if err == nil {
-				wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex())
-				continue
-			} else if err == deposeError { // if leader has been deposed
-				s.setState(follower)
-			} else {
+			if err != nil {
 				logger.Println("append entries error: ", err.Error())
+				wrappedCommand.errChan <- err
+				continue
 			}
-			wrappedCommand.errChan <- err
+			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex())
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
 			if voteRequest.GetTerm() > s.currentTerm {
@@ -363,8 +359,8 @@ func (s *Server) leaderloop() {
 			// now leader stepped down and become follower
 			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		case responseTerm := <-s.deposeChan:
-			s.currentTerm = responseTerm
 			s.stepDown()
+			s.updateCurrentTerm(responseTerm)
 		case <-hearbeatChan:
 			s.broadcastHeartbeats()
 		}
@@ -377,15 +373,7 @@ func (s *Server) broadcastHeartbeats() {
 	// logLen := len(s.log.entries)
 	for id, node := range theOtherNdoes {
 		go func(id int32, node Node) {
-			pbAER := AppendEntriesRequest{
-				LeaderID:     proto.Int32(s.id),
-				Term:         proto.Int64(s.currentTerm),
-				PrevLogIndex: proto.Int64(s.log.prevLogIndex(s.nextIndex.get(id))),
-				PrevLogTerm:  proto.Int64(s.log.prevLogTerm(s.nextIndex.get(id))),
-				CommitIndex:  proto.Int64(s.log.commitIndex),
-				Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
-			}
-			response, err := node.rpcAppendEntries(s, &pbAER)
+			response, err := s.sendAppendRequestTo(id, node)
 			if err != nil {
 				logger.Println(err.Error())
 			}
@@ -399,6 +387,18 @@ func (s *Server) broadcastHeartbeats() {
 	}
 }
 
+func (s *Server) sendAppendRequestTo(id int32, node Node) (*AppendEntriesResponse, error) {
+	appendRequest := AppendEntriesRequest{
+		LeaderID:     proto.Int32(s.id),
+		Term:         proto.Int64(s.currentTerm),
+		PrevLogIndex: proto.Int64(s.log.prevLogIndex(s.nextIndex.get(id))),
+		PrevLogTerm:  proto.Int64(s.log.prevLogTerm(s.nextIndex.get(id))),
+		CommitIndex:  proto.Int64(s.log.commitIndex),
+		Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
+	}
+	return node.rpcAppendEntries(s, &appendRequest)
+}
+
 // TODO: add more procedure
 func (s *Server) sendAppendEntries() error {
 	theOtherNodes := s.theOtherNodes()
@@ -407,15 +407,7 @@ func (s *Server) sendAppendEntries() error {
 	for id, node := range theOtherNodes {
 		go func(id int32, node Node) {
 			for {
-				pbAER := AppendEntriesRequest{
-					LeaderID:     proto.Int32(s.id),
-					Term:         proto.Int64(s.currentTerm),
-					PrevLogIndex: proto.Int64(s.log.prevLogIndex(s.nextIndex.get(id))),
-					PrevLogTerm:  proto.Int64(s.log.prevLogTerm(s.nextIndex.get(id))),
-					CommitIndex:  proto.Int64(s.log.commitIndex),
-					Entries:      s.log.entriesAfer(s.nextIndex.get(id)),
-				}
-				reponse, err := node.rpcAppendEntries(s, &pbAER)
+				reponse, err := s.sendAppendRequestTo(id, node)
 				if err != nil {
 					continue
 				}

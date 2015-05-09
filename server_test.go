@@ -3,6 +3,7 @@ package lilraft
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 var testArray []int
@@ -23,5 +24,5 @@ func TestNewServer(t *testing.T) {
 	s1.Start()
 	s2.Start()
 	s3.Start()
-	select {}
+	time.Sleep(3 * time.Second)
 }
