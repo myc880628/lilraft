@@ -334,6 +334,8 @@ func (s *Server) candidateloop() {
 				Term:    proto.Int64(s.currentTerm),
 				Success: proto.Bool(false),
 			}
+		case wrappedCommand := <-s.commandChan:
+			wrappedCommand.errChan <- fmt.Errorf("leader doesn't exist")
 		}
 	}
 }
