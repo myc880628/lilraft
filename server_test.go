@@ -13,10 +13,18 @@ var ( // context for servers
 )
 
 var (
-	s1 *Server
-	s2 *Server
-	s3 *Server
+	oldleader int32
+	newLeader int32
 )
+
+var (
+	s1      *Server
+	s2      *Server
+	s3      *Server
+	servers = make(map[int32]*Server)
+)
+
+var ports = []int{8787, 8788, 8789}
 
 func init() {
 	testArray1 = make([]int, 0)
@@ -34,6 +42,9 @@ func TestNewServer(t *testing.T) {
 	s1 = NewServer(1, &testArray1, config)
 	s2 = NewServer(2, &testArray2, config)
 	s3 = NewServer(3, &testArray3, config)
+	servers[s1.id] = s1
+	servers[s2.id] = s2
+	servers[s3.id] = s3
 }
 
 func TestStartServer(t *testing.T) {
@@ -41,9 +52,9 @@ func TestStartServer(t *testing.T) {
 	// command just need to be registered once
 	s1.RegisterCommand(&testCommand{})
 
-	s1.SetHTTPTransport(http.NewServeMux(), 8787)
-	s2.SetHTTPTransport(http.NewServeMux(), 8788)
-	s3.SetHTTPTransport(http.NewServeMux(), 8789)
+	s1.SetHTTPTransport(http.NewServeMux(), ports[0])
+	s2.SetHTTPTransport(http.NewServeMux(), ports[1])
+	s3.SetHTTPTransport(http.NewServeMux(), ports[2])
 
 	s1.Start()
 	s2.Start()
@@ -71,35 +82,49 @@ func TestExecCommand(t *testing.T) {
 	logger.Println(testArray3)
 }
 
-func TestServerStop(t *testing.T) {
-	var oldleader int32
-	if s1.getState() == leader {
-		oldleader = s1.id
-		s1.Stop()
-	} else if s2.getState() == leader {
-		oldleader = s2.id
-		s2.Stop()
-	} else if s3.getState() == leader {
-		oldleader = s3.id
-		s3.Stop()
+func TestLeaderCrash(t *testing.T) {
+	for _, server := range servers {
+		if server.getState() == leader {
+			oldleader = server.id
+			server.Stop()
+			break
+		}
 	}
+
 	time.Sleep(600 * time.Millisecond)
 
 	logger.Println("old leader: ", oldleader)
-	var newLeader int32
-	if s1.getState() == leader {
-		newLeader = s1.id
-		s1.Stop()
-	} else if s2.getState() == leader {
-		newLeader = s2.id
-		s2.Stop()
-	} else if s3.getState() == leader {
-		newLeader = s3.id
-		s3.Stop()
+
+	for _, server := range servers {
+		if server.getState() == leader {
+			newLeader = server.id
+			break
+		}
 	}
+
 	logger.Println("new leader: ", newLeader)
 
 	if oldleader == newLeader {
 		t.Errorf("leader should be different")
+	}
+
+}
+
+func TestOldLeaderReconnect(t *testing.T) {
+	oldLeaderServer := servers[oldleader]
+	oldLeaderServer.Start()
+	oldLeaderServer.setState(leader)
+	logger.Printf("old leader %d reconnected", oldLeaderServer.id)
+	time.Sleep(500 * time.Millisecond)
+	if oldLeaderServer.getState() == leader {
+		t.Errorf("old leader should stepped down")
+	}
+}
+
+func TestServerStop(t *testing.T) {
+	for _, server := range servers {
+		if server.id != newLeader {
+			server.Stop()
+		}
 	}
 }

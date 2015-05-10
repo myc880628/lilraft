@@ -260,7 +260,6 @@ func (s *Server) followerloop() {
 	}
 }
 
-// TODO: fill this
 func (s *Server) redirectClient(command Command) error {
 	if s.leader == noleader {
 		return noLeaderError
@@ -280,7 +279,7 @@ func (s *Server) redirectClient(command Command) error {
 func (s *Server) candidateloop() {
 	s.nodesVoteGranted = make(map[int32]bool)
 	s.leader = noleader
-	s.currentTerm++ // enter candidate state. Server increments its term
+	s.updateCurrentTerm(s.currentTerm + 1) // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
 	s.requestVotes()
 	s.voteForItself()
@@ -410,6 +409,8 @@ func (s *Server) broadcastHeartbeats() {
 			}
 			if response.GetSuccess() {
 				s.nextIndex.set(id, s.log.lastLogIndex())
+			} else {
+				s.nextIndex.dec(id)
 			}
 		}(id, node)
 	}
