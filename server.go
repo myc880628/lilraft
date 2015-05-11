@@ -2,7 +2,7 @@ package lilraft
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"math/rand"
@@ -119,6 +119,7 @@ type Server struct {
 	config               *configuration
 	getVoteRequestChan   chan wrappedVoteRequest
 	getAppendEntriesChan chan wrappedAppendRequest
+	getConfigChan        chan wrappedSetConfig
 	// responseChan
 	//-------leader only------------
 	deposeChan  chan int64
@@ -150,6 +151,11 @@ type wrappedVoteRequest struct {
 	responseChan chan *RequestVoteResponse
 }
 
+type wrappedSetConfig struct {
+	nodeMap map[int32]Node
+	errChan chan error
+}
+
 func (s *Server) resetElectionTimeout() {
 	s.electionTimeout = time.NewTimer(randomElectionTimeout())
 }
@@ -179,6 +185,20 @@ func (s *Server) RegisterCommand(command Command) {
 	commandType[command.Name()] = command
 }
 
+// SetConfig allows client to change the nodes of configuration
+func (s *Server) SetConfig(nodes ...Node) error {
+	nodeMap := make(map[int32]Node)
+	for _, node := range nodes {
+		nodeMap[node.id()] = node
+	}
+	errChan := make(chan error)
+	s.getConfigChan <- wrappedSetConfig{
+		nodeMap: nodeMap,
+		errChan: errChan,
+	}
+	return <-errChan
+}
+
 // NewServer can return a new server for clients
 func NewServer(id int32, context interface{}, config *configuration) (s *Server) {
 	if context == nil {
@@ -202,6 +222,7 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 		commandChan:          make(chan wrappedCommand),
 		getVoteRequestChan:   make(chan wrappedVoteRequest),
 		getAppendEntriesChan: make(chan wrappedAppendRequest),
+		getConfigChan:        make(chan wrappedSetConfig),
 	}
 	s.mutexState.setState(stopped)
 	// http.Client can cache TCP connections
@@ -255,18 +276,20 @@ func (s *Server) followerloop() {
 			appendRequest := wrappedAppendRequest.request
 			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		case wrappedCommand := <-s.commandChan:
-			wrappedCommand.errChan <- s.redirectClient(wrappedCommand.command)
+			wrappedCommand.errChan <- s.redirectClientCommand(wrappedCommand.command)
+			// case wrappendSetConfig := <-s.getConfigChan:
+			// 	wrappedSetConfig.errChan <- s.redirectClientConfig(wrappedSetConfig.nodeMap)
 		}
 	}
 }
 
-func (s *Server) redirectClient(command Command) error {
+func (s *Server) redirectClientCommand(command Command) error {
 	if s.leader == noleader {
 		return noLeaderError
 	}
 	logger.Printf("node %d redirecting client to node %d", s.id, s.leader)
 	var bytesBuffer bytes.Buffer
-	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
+	if err := gob.NewEncoder(&bytesBuffer).Encode(command); err != nil {
 		return err
 	}
 	redirectedCommand := &RedirectedCommand{
@@ -275,6 +298,13 @@ func (s *Server) redirectClient(command Command) error {
 	}
 	return s.theOtherNodes()[s.leader].rpcCommand(s, redirectedCommand)
 }
+
+// func (s *Server) redirectClientConfig(nodeMap map[int32]Node) error {
+// 	if s.leader == noleader {
+// 		return noLeaderError
+// 	}
+// 	logger.Printf("node %d redirecting config to node %d", s.id, s.leader)
+// }
 
 func (s *Server) candidateloop() {
 	s.nodesVoteGranted = make(map[int32]bool)

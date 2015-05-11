@@ -2,7 +2,7 @@ package lilraft
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 )
 
@@ -22,7 +22,7 @@ func newCommand(name string, commandData []byte) (Command, error) {
 		return nil, fmt.Errorf("command not registered")
 	}
 	logger.Println(commandData)
-	if err := json.NewDecoder(bytes.NewReader(commandData)).Decode(&command); err != nil {
+	if err := gob.NewDecoder(bytes.NewReader(commandData)).Decode(command); err != nil {
 		return nil, err
 	}
 	return command, nil

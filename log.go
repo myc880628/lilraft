@@ -2,7 +2,7 @@ package lilraft
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"sync"
 
@@ -72,6 +72,16 @@ func (log *Log) lastLogTerm() int64 {
 	return -1
 }
 
+// TODO: use this to prevent replicated commands
+func (log *Log) lastLogEntry() *LogEntry {
+	log.RLock()
+	defer log.RUnlock()
+	if len(log.entries) == 0 {
+		return nil
+	}
+	return log.entries[len(log.entries)-1]
+}
+
 func (log *Log) prevLogTerm(index int64) int64 {
 	log.RLock()
 	defer log.RUnlock()
@@ -122,9 +132,8 @@ func (log *Log) appendEntries(index int64, logEntries []*LogEntry) {
 }
 
 func (log *Log) newLogEntry(term int64, command Command) (*LogEntry, error) {
-	// TODO: add more arguments later
 	var bytesBuffer bytes.Buffer
-	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
+	if err := gob.NewEncoder(&bytesBuffer).Encode(command); err != nil {
 		return nil, err
 	}
 	pbEntry := &LogEntry{

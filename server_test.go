@@ -121,6 +121,19 @@ func TestOldLeaderReconnect(t *testing.T) {
 	}
 }
 
+// func TestChangeConfig(t *testing.T) {
+// 	s3.SetConfig(
+// 		NewHTTPNode(1, "http://127.0.0.1:8787"),
+// 		NewHTTPNode(2, "http://127.0.0.1:8788"),
+// 		NewHTTPNode(3, "http://127.0.0.1:8789"),
+// 		NewHTTPNode(4, "http://127.0.0.1:8790"),
+// 		NewHTTPNode(5, "http://127.0.0.1:8791"),
+// 	)
+// 	if len(s3.theOtherNodes()) != 5 {
+// 		t.Errorf("node count doesn't match")
+// 	}
+// }
+
 func TestServerStop(t *testing.T) {
 	for _, server := range servers {
 		if server.id != newLeader {

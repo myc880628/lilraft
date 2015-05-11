@@ -1,6 +1,7 @@
 package lilraft
 
 import (
+	"encoding/gob"
 	"fmt"
 	"net/http"
 )
@@ -12,6 +13,10 @@ const (
 	commandPath       = "/lilraft/command"
 	setConfigPath     = "/lilraft/setconfig"
 )
+
+func init() {
+	gob.Register(&HTTPNode{})
+}
 
 // SetHTTPTransport accept a http multiplexer to handle other peers'
 // RPCs like RequestVote and AppendEntry, etc.
