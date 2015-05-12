@@ -1,10 +1,14 @@
 package lilraft
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -15,6 +19,7 @@ import (
 type Log struct {
 	entries     []*LogEntry
 	commitIndex int64
+	file        *os.File
 	sync.RWMutex
 }
 
@@ -26,6 +31,10 @@ func newLog() (l *Log) {
 	return
 }
 
+func (s *Server) logPath() string {
+	return path.Join(s.path, "log")
+}
+
 // TODO: add more procedure
 func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 	log.Lock()
@@ -34,9 +43,11 @@ func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 	if startIndex < 0 {
 		return fmt.Errorf("set commit index on empty log")
 	}
+	w := bufio.NewWriter(log.file)
 	for i := log.commitIndex + 1; i <= commitIndex; i++ {
 		entryIndex := i - startIndex
 		entry := log.entries[entryIndex]
+		Encode(w, entry)
 		if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
 			continue
 		}
@@ -46,6 +57,10 @@ func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 		}
 		command.Apply(context)
 	}
+	w.Flush()
+	go func() {
+		log.file.Sync()
+	}()
 	log.commitIndex = commitIndex
 	return nil
 }
@@ -202,4 +217,39 @@ func (log *Log) contains(index int64, term int64) bool {
 		return true
 	}
 	return false
+}
+
+func (log *Log) recover(logPath string, context interface{}) (err error) {
+	log.file, err = os.OpenFile(logPath, os.O_RDWR, 0700)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if log.file, err = os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0700); err != nil {
+				return err
+			}
+			return nil
+		} else {
+			return err
+		}
+	}
+	for {
+		entry := &LogEntry{}
+		if err = Decode(log.file, entry); err != nil {
+			if err != io.EOF {
+				logger.Println("recover and decode entry err:", err.Error())
+			}
+			break
+		}
+		if entry.GetIndex() > log.startIndex() {
+			log.entries = append(log.entries, entry)
+			command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
+			if err != nil {
+				continue
+			}
+			if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
+				continue
+			}
+			command.Apply(context)
+		}
+	}
+	return nil
 }

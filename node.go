@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/url"
 
 	"github.com/golang/protobuf/proto"
@@ -143,8 +142,14 @@ func (node *HTTPNode) rpcSetConfig(server *Server, nodes []Node) error {
 	return nil
 }
 
-func Decode(body io.Reader, pb proto.Message) error {
-	data, err := ioutil.ReadAll(body)
+func Decode(r io.Reader, pb proto.Message) error {
+	var length int
+	_, err := fmt.Fscanf(r, "%8x\n", &length)
+	if err != nil {
+		return err
+	}
+	data := make([]byte, length)
+	_, err = io.ReadFull(r, data)
 	if err != nil {
 		return err
 	}
@@ -159,8 +164,9 @@ func Encode(w io.Writer, pb proto.Message) error {
 	if err != nil {
 		return err
 	}
-	if _, err = w.Write(data); err != nil {
+	if _, err = fmt.Fprintf(w, "%8x\n", len(data)); err != nil {
 		return err
 	}
-	return nil
+	_, err = w.Write(data)
+	return err
 }

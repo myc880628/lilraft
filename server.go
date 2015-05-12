@@ -133,6 +133,7 @@ type Server struct {
 	getVoteResponseChan chan wrappedVoteResponse
 	nodesVoteGranted    map[int32]bool
 	//-----------------------------
+	path string
 	mutexState
 }
 
@@ -201,7 +202,7 @@ func (s *Server) SetConfig(nodes ...Node) error {
 }
 
 // NewServer can return a new server for clients
-func NewServer(id int32, context interface{}, config *configuration) (s *Server) {
+func NewServer(id int32, context interface{}, config *configuration, path string) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
@@ -215,6 +216,7 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 		id:                   id,
 		leader:               noleader,
 		context:              context,
+		path:                 path,
 		currentTerm:          0,
 		log:                  newLog(),
 		voted:                false,
@@ -231,6 +233,13 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 	s.httpClient.Timeout = time.Duration(minTimeout/2) * time.Millisecond
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
 	s.resetElectionTimeout()
+	err := os.MkdirAll(path, 0700)
+	if err != nil && !os.IsExist(err) {
+		panic(err.Error())
+	}
+	if err := s.log.recover(s.logPath(), s.context); err != nil {
+		logger.Println("server recover", s.logPath(), "error: ", err.Error())
+	}
 	return
 }
 

@@ -1,7 +1,9 @@
 package lilraft
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -45,11 +47,11 @@ func TestNewServer(t *testing.T) {
 		NewHTTPNode(2, "http://127.0.0.1:8788"),
 		NewHTTPNode(3, "http://127.0.0.1:8789"),
 	)
-	s1 = NewServer(1, &testArray1, config)
+	s1 = NewServer(1, &testArray1, config, "s1/")
 	time.Sleep(50 * time.Millisecond)
-	s2 = NewServer(2, &testArray2, config)
+	s2 = NewServer(2, &testArray2, config, "s2/")
 	time.Sleep(50 * time.Millisecond)
-	s3 = NewServer(3, &testArray3, config)
+	s3 = NewServer(3, &testArray3, config, "s3/")
 	servers[s1.id] = s1
 	servers[s2.id] = s2
 	servers[s3.id] = s3
@@ -72,7 +74,7 @@ func TestStartServer(t *testing.T) {
 }
 
 func TestExecCommand(t *testing.T) {
-	s3.Exec(newTestCommand(1, 2046))
+	s3.Exec(newTestCommand(2046))
 	time.Sleep(500 * time.Millisecond)
 
 	if testArray1[0] != 2046 {
@@ -138,9 +140,9 @@ func TestChangeConfig(t *testing.T) {
 		NewHTTPNode(5, "http://127.0.0.1:8791"),
 	)
 
-	s4 = NewServer(4, &testArray4, config)
+	s4 = NewServer(4, &testArray4, config, "s4/")
 	time.Sleep(50 * time.Millisecond)
-	s5 = NewServer(5, &testArray5, config)
+	s5 = NewServer(5, &testArray5, config, "s5/")
 
 	servers[4] = s4
 	servers[5] = s5
@@ -171,7 +173,7 @@ func TestChangeConfig(t *testing.T) {
 }
 
 func TestExecCommandAgain(t *testing.T) {
-	s4.Exec(newTestCommand(2, 1997))
+	s4.Exec(newTestCommand(1997))
 	time.Sleep(100 * time.Millisecond)
 	if testArray1[1] != 1997 {
 		t.Errorf("value should be in s1 context")
@@ -190,7 +192,42 @@ func TestExecCommandAgain(t *testing.T) {
 	}
 }
 
-func TestServerStop(t *testing.T) {
+func TestServerRecover(t *testing.T) {
+	testArray := make([][]int, 6)
+	for _, server := range servers {
+		server.Stop()
+	}
+	config := NewConfig(
+		NewHTTPNode(1, "http://127.0.0.1:8787"),
+		NewHTTPNode(2, "http://127.0.0.1:8788"),
+		NewHTTPNode(3, "http://127.0.0.1:8789"),
+		NewHTTPNode(4, "http://127.0.0.1:8790"),
+		NewHTTPNode(5, "http://127.0.0.1:8791"),
+	)
+
+	for id := range servers {
+		testArray[id] = make([]int, 0)
+	}
+
+	for id, server := range servers {
+		server = NewServer(id, &testArray[id], config, fmt.Sprintf("s%d/", id))
+		server.Start()
+	}
+
+	time.Sleep(80 * time.Millisecond)
+
+	for id := range servers {
+		if testArray[id][1] != 1997 {
+			t.Errorf("value should be in s1 context")
+		}
+		if err := os.RemoveAll(fmt.Sprintf("s%d", id)); err != nil {
+			logger.Println(err.Error())
+		}
+	}
+
+}
+
+func TestServerFinalStop(t *testing.T) {
 	for _, server := range servers {
 		server.Stop()
 	}
