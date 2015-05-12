@@ -1,5 +1,8 @@
 package lilraft
 
+var cOldNewStr = "Cold,new"
+var cNewStr = "Cnew"
+
 // implement joint consensus
 type configuration struct {
 	mutexState // configuration can have C_old state or C_old_new state

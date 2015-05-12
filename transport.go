@@ -14,10 +14,6 @@ const (
 	setConfigPath     = "/lilraft/setconfig"
 )
 
-func init() {
-	gob.Register(&HTTPNode{})
-}
-
 // SetHTTPTransport accept a http multiplexer to handle other peers'
 // RPCs like RequestVote and AppendEntry, etc.
 // Run this before running server.Start().
@@ -90,16 +86,18 @@ func commandHandler(s *Server) http.HandlerFunc {
 		rCommand := &RedirectedCommand{}
 		if err := Decode(r.Body, rCommand); err != nil {
 			logger.Printf("node %d decode voteRequest error: %s\n", s.id, err.Error())
+			w.Write([]byte("failed"))
 			return
 		}
 		logger.Println("node ", s.id, " get command")
 		command, err := newCommand(rCommand.GetCommandName(), rCommand.GetCommand())
 		if err != nil {
 			logger.Printf("node %d generate new command error: %s\n", s.id, err.Error())
+			w.Write([]byte("failed"))
 			return
 		}
-		err = s.Exec(command)
-		if err != nil {
+
+		if err := s.Exec(command); err != nil {
 			w.Write([]byte("failed"))
 			return
 		}
@@ -110,6 +108,17 @@ func commandHandler(s *Server) http.HandlerFunc {
 // TODO: fill this func
 func setConfigHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		defer r.Body.Close()
+		logger.Println("config in comming")
+		// httpNodes := []*HTTPNode{}
+		nodes := []Node{}
+		if err := gob.NewDecoder(r.Body).Decode(&nodes); err != nil {
+			logger.Printf("node %d decode config error: %s\n", s.id, err.Error())
+		}
+		if err := s.SetConfig(nodes...); err != nil {
+			w.Write([]byte("failed"))
+			return
+		}
+		w.Write([]byte("success"))
 	}
 }

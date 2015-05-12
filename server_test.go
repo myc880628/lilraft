@@ -10,6 +10,8 @@ var ( // context for servers
 	testArray1 []int
 	testArray2 []int
 	testArray3 []int
+	testArray4 []int
+	testArray5 []int
 )
 
 var (
@@ -21,15 +23,19 @@ var (
 	s1      *Server
 	s2      *Server
 	s3      *Server
+	s4      *Server
+	s5      *Server
 	servers = make(map[int32]*Server)
 )
 
-var ports = []int{8787, 8788, 8789}
+var ports = []int{8787, 8788, 8789, 8790, 8791}
 
 func init() {
 	testArray1 = make([]int, 0)
 	testArray2 = make([]int, 0)
 	testArray3 = make([]int, 0)
+	testArray4 = make([]int, 0)
+	testArray5 = make([]int, 0)
 }
 
 func TestNewServer(t *testing.T) {
@@ -40,7 +46,9 @@ func TestNewServer(t *testing.T) {
 		NewHTTPNode(3, "http://127.0.0.1:8789"),
 	)
 	s1 = NewServer(1, &testArray1, config)
+	time.Sleep(50 * time.Millisecond)
 	s2 = NewServer(2, &testArray2, config)
+	time.Sleep(50 * time.Millisecond)
 	s3 = NewServer(3, &testArray3, config)
 	servers[s1.id] = s1
 	servers[s2.id] = s2
@@ -121,23 +129,49 @@ func TestOldLeaderReconnect(t *testing.T) {
 	}
 }
 
-// func TestChangeConfig(t *testing.T) {
-// 	s3.SetConfig(
-// 		NewHTTPNode(1, "http://127.0.0.1:8787"),
-// 		NewHTTPNode(2, "http://127.0.0.1:8788"),
-// 		NewHTTPNode(3, "http://127.0.0.1:8789"),
-// 		NewHTTPNode(4, "http://127.0.0.1:8790"),
-// 		NewHTTPNode(5, "http://127.0.0.1:8791"),
-// 	)
-// 	if len(s3.theOtherNodes()) != 5 {
-// 		t.Errorf("node count doesn't match")
-// 	}
-// }
+func TestChangeConfig(t *testing.T) {
+	config := NewConfig(
+		NewHTTPNode(1, "http://127.0.0.1:8787"),
+		NewHTTPNode(2, "http://127.0.0.1:8788"),
+		NewHTTPNode(3, "http://127.0.0.1:8789"),
+		NewHTTPNode(4, "http://127.0.0.1:8790"),
+		NewHTTPNode(5, "http://127.0.0.1:8791"),
+	)
+
+	s4 = NewServer(4, &testArray4, config)
+	time.Sleep(50 * time.Millisecond)
+	s5 = NewServer(5, &testArray5, config)
+
+	servers[4] = s4
+	servers[5] = s5
+
+	s4.SetHTTPTransport(http.NewServeMux(), ports[3])
+	s5.SetHTTPTransport(http.NewServeMux(), ports[4])
+
+	s4.Start()
+	s5.Start()
+
+	err := s3.SetConfig(
+		NewHTTPNode(1, "http://127.0.0.1:8787"),
+		NewHTTPNode(2, "http://127.0.0.1:8788"),
+		NewHTTPNode(3, "http://127.0.0.1:8789"),
+		NewHTTPNode(4, "http://127.0.0.1:8790"),
+		NewHTTPNode(5, "http://127.0.0.1:8791"),
+	)
+	if err != nil {
+		logger.Println("s3 set config error: ", err.Error())
+	}
+	time.Sleep(500 * time.Millisecond)
+	if len(s3.theOtherNodes()) != 4 {
+		t.Errorf("node count doesn't match")
+	}
+	if s3.config.getState() != c_old {
+		t.Errorf("config state is wrong")
+	}
+}
 
 func TestServerStop(t *testing.T) {
 	for _, server := range servers {
-		if server.id != newLeader {
-			server.Stop()
-		}
+		server.Stop()
 	}
 }

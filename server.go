@@ -3,6 +3,7 @@ package lilraft
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -13,6 +14,10 @@ import (
 
 	"github.com/golang/protobuf/proto"
 )
+
+func init() {
+	gob.Register(&HTTPNode{})
+}
 
 // Logger
 var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
@@ -75,7 +80,7 @@ func (ni *nextIndex) get(id int32) int64 {
 	ni.RLock()
 	defer ni.RUnlock()
 	if index, ok := ni.m[id]; !ok {
-		panic("lilraft: wrong peer in []NextIndex")
+		panic("lilraft: wrong node in []NextIndex")
 	} else {
 		return index
 	}
@@ -152,7 +157,7 @@ type wrappedVoteRequest struct {
 }
 
 type wrappedSetConfig struct {
-	nodeMap map[int32]Node
+	nodes   []Node
 	errChan chan error
 }
 
@@ -187,13 +192,9 @@ func (s *Server) RegisterCommand(command Command) {
 
 // SetConfig allows client to change the nodes of configuration
 func (s *Server) SetConfig(nodes ...Node) error {
-	nodeMap := make(map[int32]Node)
-	for _, node := range nodes {
-		nodeMap[node.id()] = node
-	}
 	errChan := make(chan error)
 	s.getConfigChan <- wrappedSetConfig{
-		nodeMap: nodeMap,
+		nodes:   nodes,
 		errChan: errChan,
 	}
 	return <-errChan
@@ -228,7 +229,6 @@ func NewServer(id int32, context interface{}, config *configuration) (s *Server)
 	// http.Client can cache TCP connections
 	s.httpClient.Transport = &http.Transport{DisableKeepAlives: false}
 	s.httpClient.Timeout = time.Duration(minTimeout/2) * time.Millisecond
-	time.Sleep(1 * time.Second)
 	rand.Seed(time.Now().Unix()) // random seed for election timeout
 	s.resetElectionTimeout()
 	return
@@ -277,8 +277,8 @@ func (s *Server) followerloop() {
 			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		case wrappedCommand := <-s.commandChan:
 			wrappedCommand.errChan <- s.redirectClientCommand(wrappedCommand.command)
-			// case wrappendSetConfig := <-s.getConfigChan:
-			// 	wrappedSetConfig.errChan <- s.redirectClientConfig(wrappedSetConfig.nodeMap)
+		case wrappedSetConfig := <-s.getConfigChan:
+			wrappedSetConfig.errChan <- s.redirectClientConfig(wrappedSetConfig.nodes)
 		}
 	}
 }
@@ -289,7 +289,7 @@ func (s *Server) redirectClientCommand(command Command) error {
 	}
 	logger.Printf("node %d redirecting client to node %d", s.id, s.leader)
 	var bytesBuffer bytes.Buffer
-	if err := gob.NewEncoder(&bytesBuffer).Encode(command); err != nil {
+	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
 		return err
 	}
 	redirectedCommand := &RedirectedCommand{
@@ -299,12 +299,14 @@ func (s *Server) redirectClientCommand(command Command) error {
 	return s.theOtherNodes()[s.leader].rpcCommand(s, redirectedCommand)
 }
 
-// func (s *Server) redirectClientConfig(nodeMap map[int32]Node) error {
-// 	if s.leader == noleader {
-// 		return noLeaderError
-// 	}
-// 	logger.Printf("node %d redirecting config to node %d", s.id, s.leader)
-// }
+func (s *Server) redirectClientConfig(nodes []Node) error {
+	if s.leader == noleader {
+		return noLeaderError
+	}
+	logger.Printf("node %d redirecting config to node %d", s.id, s.leader)
+
+	return s.theOtherNodes()[s.leader].rpcSetConfig(s, nodes)
+}
 
 func (s *Server) candidateloop() {
 	s.nodesVoteGranted = make(map[int32]bool)
@@ -365,6 +367,8 @@ func (s *Server) candidateloop() {
 			}
 		case wrappedCommand := <-s.commandChan:
 			wrappedCommand.errChan <- fmt.Errorf("leader doesn't exist")
+		case wrappedSetConfig := <-s.getConfigChan:
+			wrappedSetConfig.errChan <- fmt.Errorf("leader doesn't exist")
 		}
 	}
 }
@@ -401,6 +405,56 @@ func (s *Server) leaderloop() {
 				continue
 			}
 			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex(), s.context)
+		case wrappedSetConfig := <-s.getConfigChan:
+			nodes := wrappedSetConfig.nodes
+			cOldNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cOldNewStr)
+			if err != nil {
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			s.config.setState(c_old_new)
+			s.config.c_NewNode = makeNodeMap(nodes...)
+			for _, node := range nodes {
+				if _, ok := s.nextIndex.m[node.id()]; !ok {
+					s.nextIndex.set(node.id(), s.log.lastLogIndex())
+				}
+			}
+			s.log.appendEntry(cOldNewEntry)
+			err = s.sendAppendEntries()
+			if err != nil {
+				logger.Println("append Coldnew config entries error: ", err.Error())
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			// now c_old_new has send to majorities of c_new and c_old and commit ColdNew
+			cNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cNewStr)
+			if err != nil {
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			s.log.appendEntry(cNewEntry)
+			s.config.setState(c_old)
+			s.config.c_OldNode = makeNodeMap(nodes...)
+			s.config.c_NewNode = nil
+			err = s.sendAppendEntries()
+			if err != nil {
+				logger.Println("append Cnew config entries error: ", err.Error())
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+				wrappedSetConfig.errChan <- err
+				continue
+			}
+			// now c_new has been commited
+			if s.config.c_OldNode[s.id] == nil {
+				s.setState(stopped)
+			}
+			wrappedSetConfig.errChan <- nil
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
 			if voteRequest.GetTerm() > s.currentTerm {
@@ -427,7 +481,6 @@ func (s *Server) leaderloop() {
 // TODO: refactor this
 func (s *Server) broadcastHeartbeats() {
 	theOtherNdoes := s.theOtherNodes()
-	// logLen := len(s.log.entries)
 	for id, node := range theOtherNdoes {
 		go func(id int32, node Node) {
 			response, err := s.sendAppendRequestTo(id, node)
@@ -461,7 +514,9 @@ func (s *Server) sendAppendRequestTo(id int32, node Node) (*AppendEntriesRespons
 // TODO: add more procedure
 func (s *Server) sendAppendEntries() error {
 	theOtherNodes := s.theOtherNodes()
-	successChan := make(chan struct{}, len(theOtherNodes))
+	oldNode := s.config.c_OldNode
+	newNode := s.config.c_NewNode
+	successChan := make(chan int32, len(theOtherNodes))
 	errChan := make(chan error, len(theOtherNodes))
 	for id, node := range theOtherNodes {
 		go func(id int32, node Node) {
@@ -483,25 +538,35 @@ func (s *Server) sendAppendEntries() error {
 				}
 				logger.Printf("node %d append entries succeedded\n", id)
 				s.nextIndex.set(id, s.log.lastLogIndex())
-				successChan <- struct{}{}
+				successChan <- id
 				return
 			}
 		}(id, node)
 	}
-	successCount := 0
+	oldSuccessCount := 1
+	newSuccessCount := 1
+	if newNode != nil && newNode[s.id] == nil {
+		newSuccessCount = 0
+	}
 	go func() {
+		acceptCount := 0
 		for {
 			select {
-			case <-successChan:
-				successCount++
-				if successCount == len(theOtherNodes)/2 {
+			case id := <-successChan:
+				acceptCount++
+				if oldNode[id] != nil {
+					oldSuccessCount++
+				}
+				if newNode[id] != nil {
+					newSuccessCount++
+				}
+				if oldSuccessCount >= len(oldNode)/2+1 && newSuccessCount >= len(newNode)/2+1 {
 					// PAPER: Agreement(for elections and entry commitment)requires
 					// separate majorities from both the old and new
 					// configurations.
-					// so this needs to be changed later
 					errChan <- nil
 				}
-				if successCount == len(theOtherNodes) {
+				if acceptCount >= len(theOtherNodes) {
 					return // all nodes have accept request
 				}
 			}
@@ -544,7 +609,7 @@ func (s *Server) handleAppendEntriesRequest(appendRequest *AppendEntriesRequest)
 		s.updateCurrentTerm(appendRequest.GetTerm())
 	}
 	if s.log.contains(appendRequest.GetPrevLogIndex(), appendRequest.GetPrevLogTerm()) {
-		s.log.appendEntries(appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
+		s.log.appendEntries(s, appendRequest.GetPrevLogIndex(), appendRequest.GetEntries())
 		resp.Success = proto.Bool(true)
 
 		if s.leader == noleader {

@@ -3,6 +3,7 @@ package lilraft
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -36,6 +37,9 @@ func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 	for i := log.commitIndex + 1; i <= commitIndex; i++ {
 		entryIndex := i - startIndex
 		entry := log.entries[entryIndex]
+		if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
+			continue
+		}
 		command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
 		if err != nil {
 			return err
@@ -121,25 +125,62 @@ func (log *Log) appendEntry(logEntry *LogEntry) {
 	log.entries = append(log.entries, logEntry)
 }
 
-func (log *Log) appendEntries(index int64, logEntries []*LogEntry) {
+func (log *Log) appendEntries(s *Server, prevIndex int64, logEntries []*LogEntry) {
 	log.Lock()
 	defer log.Unlock()
 	if len(log.entries) == 0 {
 		log.entries = logEntries
 		return
 	}
-	log.entries = append(log.entries[:(index-log.startIndex())+1], logEntries...)
+	log.entries = log.entries[:prevIndex-log.startIndex()+1]
+	// log.entries = append(log.entries[:(index-log.startIndex())+1], logEntries...)
+	for _, entry := range logEntries {
+		if entry.GetCommandName() == cOldNewStr {
+			nodes := []Node{}
+			if err := gob.NewDecoder(bytes.NewReader(entry.GetCommand())).Decode(&nodes); err != nil {
+				logger.Println("decode Cold,new config err: ", err.Error())
+			}
+			s.config.setState(c_old_new)
+			s.config.c_NewNode = make(nodeMap)
+			for _, node := range nodes {
+				s.config.c_NewNode[node.id()] = node
+			}
+		} else if entry.GetCommandName() == cNewStr {
+			nodes := []Node{}
+			if err := gob.NewDecoder(bytes.NewReader(entry.GetCommand())).Decode(&nodes); err != nil {
+				logger.Println("decode Cnew config err: ", err.Error())
+			}
+			s.config.setState(c_old)
+			s.config.c_OldNode = makeNodeMap(nodes...)
+			s.config.c_NewNode = nil
+		}
+		log.entries = append(log.entries, entry)
+	}
 }
 
 func (log *Log) newLogEntry(term int64, command Command) (*LogEntry, error) {
 	var bytesBuffer bytes.Buffer
-	if err := gob.NewEncoder(&bytesBuffer).Encode(command); err != nil {
+	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
 		return nil, err
 	}
 	pbEntry := &LogEntry{
 		Index:       proto.Int64(log.lastLogIndex() + 1),
 		Term:        proto.Int64(term),
 		CommandName: proto.String(command.Name()),
+		Command:     bytesBuffer.Bytes(),
+	}
+	return pbEntry, nil
+}
+
+func (log *Log) newConfigEntry(term int64, nodes []Node, state string) (*LogEntry, error) {
+	var bytesBuffer bytes.Buffer
+	if err := gob.NewEncoder(&bytesBuffer).Encode(nodes); err != nil {
+		return nil, err
+	}
+	pbEntry := &LogEntry{
+		Index:       proto.Int64(log.lastLogIndex() + 1),
+		Term:        proto.Int64(term),
+		CommandName: proto.String(state),
 		Command:     bytesBuffer.Bytes(),
 	}
 	return pbEntry, nil

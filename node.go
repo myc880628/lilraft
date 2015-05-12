@@ -2,6 +2,7 @@ package lilraft
 
 import (
 	"bytes"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,7 +16,8 @@ type Node interface {
 	id() int32
 	rpcAppendEntries(*Server, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	rpcRequestVote(*Server, *RequestVoteRequest) (*RequestVoteResponse, error)
-	rpcCommand(*Server, *RedirectedCommand) error // followers or candidates use this to redirect client's commands to leader
+	rpcCommand(*Server, *RedirectedCommand) error // followers use this to redirect client's commands to leader
+	rpcSetConfig(*Server, []Node) error           // followers use this to redirect client's new configuration
 }
 
 // nodeMap wraps some useful function with a map
@@ -32,22 +34,21 @@ func makeNodeMap(nodes ...Node) (nm nodeMap) {
 
 type HTTPNode struct {
 	ID  int32
-	URL *url.URL
+	URL string
 }
 
 func NewHTTPNode(id int32, rawurl string) (httpNode *HTTPNode) {
-	u, err := url.Parse(rawurl)
+	_, err := url.Parse(rawurl)
 	if err != nil {
 		panic(err)
 	}
 	if id <= 0 {
 		panic("node id should be > 0")
 	}
-	u.Path = ""
-	logger.Printf("node url: %s\n", u.String())
+	logger.Printf("node url: %s\n", rawurl)
 	return &HTTPNode{
 		ID:  id,
-		URL: u,
+		URL: rawurl,
 	}
 }
 
@@ -61,7 +62,7 @@ func (node *HTTPNode) rpcRequestVote(server *Server, rvr *RequestVoteRequest) (*
 	if err := Encode(&bytesBuffer, rvr); err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s%s", node.URL.String(), requestVotePath)
+	url := fmt.Sprintf("%s%s", node.URL, requestVotePath)
 	// Send request to node
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
@@ -80,7 +81,7 @@ func (node *HTTPNode) rpcAppendEntries(server *Server, aer *AppendEntriesRequest
 	if err := Encode(&bytesBuffer, aer); err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s%s", node.URL.String(), appendEntriesPath)
+	url := fmt.Sprintf("%s%s", node.URL, appendEntriesPath)
 	// Send request to nodes
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
@@ -106,7 +107,28 @@ func (node *HTTPNode) rpcCommand(server *Server, rCommand *RedirectedCommand) er
 	if err := Encode(&bytesBuffer, rCommand); err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s%s", node.URL.String(), commandPath)
+	url := fmt.Sprintf("%s%s", node.URL, commandPath)
+	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
+	if err != nil {
+		return err
+	}
+	var resp []byte
+	if _, err := httpResponse.Body.Read(resp); err != nil {
+		return err
+	}
+	if string(resp) == "failed" {
+		return fmt.Errorf("node %d exec command failed", node.id())
+	}
+	return nil
+}
+
+// TODO: this needs to be refactor
+func (node *HTTPNode) rpcSetConfig(server *Server, nodes []Node) error {
+	var bytesBuffer bytes.Buffer
+	if err := gob.NewEncoder(&bytesBuffer).Encode(nodes); err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s%s", node.URL, setConfigPath)
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
 		return err
