@@ -40,7 +40,7 @@ func appendEntriesHandler(s *Server) http.HandlerFunc {
 			logger.Printf("node %d decode appendEntriesRequest err: %s \n", s.id, err.Error())
 			return
 		}
-		logger.Printf("node %d: append entries in comming!", s.id)
+		// logger.Printf("node %d: append entries in comming!", s.id)
 		respChan := make(chan *AppendEntriesResponse)
 		s.getAppendEntriesChan <- wrappedAppendRequest{
 			request:      appendEntriesRequest,

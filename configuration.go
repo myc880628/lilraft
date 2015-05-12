@@ -6,15 +6,15 @@ var cNewStr = "Cnew"
 // implement joint consensus
 type configuration struct {
 	mutexState // configuration can have C_old state or C_old_new state
-	c_OldNode  nodeMap
-	c_NewNode  nodeMap
+	cOldNode   nodeMap
+	cNewNode   nodeMap
 }
 
-// TODO: add more procedures
+// NewConfig accepts client's given node and return a new configuration
 func NewConfig(nodes ...Node) (conf *configuration) {
 	conf = &configuration{
-		c_OldNode: makeNodeMap(nodes...),
+		cOldNode: makeNodeMap(nodes...),
 	}
-	conf.setState(c_old)
+	conf.setState(cOld)
 	return
 }

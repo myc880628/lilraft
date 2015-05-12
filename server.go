@@ -24,8 +24,8 @@ var logger = log.New(os.Stdout, "[lilraft]", log.Lmicroseconds)
 
 // Error
 var (
-	deposeError   = fmt.Errorf("leader got deposed")
-	noLeaderError = fmt.Errorf("cannot find leader")
+	errDepose   = fmt.Errorf("leader got deposed")
+	errNoLeader = fmt.Errorf("cannot find leader")
 )
 
 // state constant
@@ -35,8 +35,8 @@ const (
 	leader
 	stopped
 	noleader
-	c_old
-	c_old_new
+	cOld
+	cOldNew
 )
 
 var (
@@ -240,6 +240,7 @@ func (s *Server) Start() {
 	go s.loop()
 }
 
+// Stop stops a server by setting server's state(a integer) to stopped
 func (s *Server) Stop() {
 	s.setState(stopped)
 }
@@ -285,7 +286,7 @@ func (s *Server) followerloop() {
 
 func (s *Server) redirectClientCommand(command Command) error {
 	if s.leader == noleader {
-		return noLeaderError
+		return errNoLeader
 	}
 	logger.Printf("node %d redirecting client to node %d", s.id, s.leader)
 	var bytesBuffer bytes.Buffer
@@ -301,7 +302,7 @@ func (s *Server) redirectClientCommand(command Command) error {
 
 func (s *Server) redirectClientConfig(nodes []Node) error {
 	if s.leader == noleader {
-		return noLeaderError
+		return errNoLeader
 	}
 	logger.Printf("node %d redirecting config to node %d", s.id, s.leader)
 
@@ -331,7 +332,7 @@ func (s *Server) candidateloop() {
 			}
 			if s.electionPass() {
 				// TODO: delete these logger
-				for id, _ := range s.nodesVoteGranted {
+				for id := range s.nodesVoteGranted {
 					logger.Printf("node %d vote for node %d", id, s.id)
 				}
 				logger.Printf("node %d became leader\n", s.id)
@@ -406,55 +407,9 @@ func (s *Server) leaderloop() {
 			}
 			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex(), s.context)
 		case wrappedSetConfig := <-s.getConfigChan:
-			nodes := wrappedSetConfig.nodes
-			cOldNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cOldNewStr)
-			if err != nil {
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			s.config.setState(c_old_new)
-			s.config.c_NewNode = makeNodeMap(nodes...)
-			for _, node := range nodes {
-				if _, ok := s.nextIndex.m[node.id()]; !ok {
-					s.nextIndex.set(node.id(), s.log.lastLogIndex())
-				}
-			}
-			s.log.appendEntry(cOldNewEntry)
-			err = s.sendAppendEntries()
-			if err != nil {
-				logger.Println("append Coldnew config entries error: ", err.Error())
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			// now c_old_new has send to majorities of c_new and c_old and commit ColdNew
-			cNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cNewStr)
-			if err != nil {
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			s.log.appendEntry(cNewEntry)
-			s.config.setState(c_old)
-			s.config.c_OldNode = makeNodeMap(nodes...)
-			s.config.c_NewNode = nil
-			err = s.sendAppendEntries()
-			if err != nil {
-				logger.Println("append Cnew config entries error: ", err.Error())
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
-				wrappedSetConfig.errChan <- err
-				continue
-			}
-			// now c_new has been commited
-			if s.config.c_OldNode[s.id] == nil {
-				s.setState(stopped)
-			}
-			wrappedSetConfig.errChan <- nil
+			go func() {
+				wrappedSetConfig.errChan <- s.processSetConfig(&wrappedSetConfig)
+			}()
 		case wrappedVoteRequest := <-s.getVoteRequestChan:
 			voteRequest := wrappedVoteRequest.request
 			if voteRequest.GetTerm() > s.currentTerm {
@@ -511,11 +466,10 @@ func (s *Server) sendAppendRequestTo(id int32, node Node) (*AppendEntriesRespons
 	return node.rpcAppendEntries(s, &appendRequest)
 }
 
-// TODO: add more procedure
 func (s *Server) sendAppendEntries() error {
 	theOtherNodes := s.theOtherNodes()
-	oldNode := s.config.c_OldNode
-	newNode := s.config.c_NewNode
+	oldNode := s.config.cOldNode
+	newNode := s.config.cNewNode
 	successChan := make(chan int32, len(theOtherNodes))
 	errChan := make(chan error, len(theOtherNodes))
 	for id, node := range theOtherNodes {
@@ -526,7 +480,7 @@ func (s *Server) sendAppendEntries() error {
 					continue
 				}
 				if rTerm := reponse.GetTerm(); rTerm > s.currentTerm {
-					errChan <- deposeError
+					errChan <- errDepose
 					s.deposeChan <- rTerm // leader stale
 					return
 				}
@@ -577,14 +531,14 @@ func (s *Server) sendAppendEntries() error {
 
 func (s *Server) theOtherNodes() nodeMap {
 	nMap := make(nodeMap)
-	for id, node := range s.config.c_NewNode {
+	for id, node := range s.config.cNewNode {
 		if id == s.id {
 			continue
 		}
 		nMap[id] = node
 	}
 
-	for id, node := range s.config.c_OldNode {
+	for id, node := range s.config.cOldNode {
 		if id == s.id {
 			continue
 		}
@@ -682,30 +636,30 @@ func (s *Server) requestVotes() {
 }
 
 func (s *Server) electionPass() bool {
-	if s.config.getState() == c_old {
+	if s.config.getState() == cOld {
 		votesCount := 0
-		for id := range s.config.c_OldNode {
+		for id := range s.config.cOldNode {
 			if s.nodesVoteGranted[id] == true {
 				votesCount++
 			}
 		}
-		if votesCount >= len(s.config.c_OldNode)/2+1 {
+		if votesCount >= len(s.config.cOldNode)/2+1 {
 			return true
 		}
-	} else if s.config.getState() == c_old_new { // candidate must be approved by Cold and Cold,new.
+	} else if s.config.getState() == cOldNew { // candidate must be approved by Cold and Cold,new.
 		voteCountOld := 0
 		voteCountOldNew := 0
-		for id := range s.config.c_OldNode {
+		for id := range s.config.cOldNode {
 			if s.nodesVoteGranted[id] == true {
 				voteCountOld++
 			}
 		}
-		for id := range s.config.c_NewNode {
+		for id := range s.config.cNewNode {
 			if s.nodesVoteGranted[id] == true {
 				voteCountOldNew++
 			}
 		}
-		if voteCountOld >= len(s.config.c_OldNode)/2+1 && voteCountOldNew >= len(s.config.c_NewNode)/2+1 {
+		if voteCountOld >= len(s.config.cOldNode)/2+1 && voteCountOldNew >= len(s.config.cNewNode)/2+1 {
 			// if pass both old and new config
 			return true
 		}
@@ -720,4 +674,50 @@ func (s *Server) stepDown() {
 	s.setState(follower)
 	s.leader = noleader
 	logger.Printf("node %d step down to follower\n", s.id)
+}
+
+func (s *Server) processSetConfig(wrappedSetConfig *wrappedSetConfig) error {
+	nodes := wrappedSetConfig.nodes
+	cOldNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cOldNewStr)
+	if err != nil {
+		return err
+	}
+	s.config.setState(cOldNew)
+	s.config.cNewNode = makeNodeMap(nodes...)
+	for _, node := range nodes {
+		if _, ok := s.nextIndex.m[node.id()]; !ok {
+			s.nextIndex.set(node.id(), s.log.lastLogIndex())
+		}
+	}
+	s.log.appendEntry(cOldNewEntry)
+	err = s.sendAppendEntries()
+	if err != nil {
+		logger.Println("append Coldnew config entries error: ", err.Error())
+		return err
+	}
+	if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+		return err
+	}
+	// now cOldNew has send to majorities of c_new and cOld and commit ColdNew
+	cNewEntry, err := s.log.newConfigEntry(s.currentTerm, nodes, cNewStr)
+	if err != nil {
+		return err
+	}
+	s.log.appendEntry(cNewEntry)
+	s.config.setState(cOld)
+	s.config.cOldNode = makeNodeMap(nodes...)
+	s.config.cNewNode = nil
+	err = s.sendAppendEntries()
+	if err != nil {
+		logger.Println("append Cnew config entries error: ", err.Error())
+		return err
+	}
+	if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+		return err
+	}
+	// now c_new has been commited
+	if s.config.cOldNode[s.id] == nil {
+		s.setState(stopped)
+	}
+	return nil
 }

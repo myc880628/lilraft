@@ -165,8 +165,28 @@ func TestChangeConfig(t *testing.T) {
 	if len(s3.theOtherNodes()) != 4 {
 		t.Errorf("node count doesn't match")
 	}
-	if s3.config.getState() != c_old {
+	if s3.config.getState() != cOld {
 		t.Errorf("config state is wrong")
+	}
+}
+
+func TestExecCommandAgain(t *testing.T) {
+	s4.Exec(newTestCommand(2, 1997))
+	time.Sleep(100 * time.Millisecond)
+	if testArray1[1] != 1997 {
+		t.Errorf("value should be in s1 context")
+	}
+	if testArray2[1] != 1997 {
+		t.Errorf("value should be in s2 context")
+	}
+	if testArray3[1] != 1997 {
+		t.Errorf("value should be in s3 context")
+	}
+	if testArray4[1] != 1997 {
+		t.Errorf("value should be in s2 context")
+	}
+	if testArray5[1] != 1997 {
+		t.Errorf("value should be in s3 context")
 	}
 }
 

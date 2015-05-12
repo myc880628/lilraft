@@ -140,19 +140,19 @@ func (log *Log) appendEntries(s *Server, prevIndex int64, logEntries []*LogEntry
 			if err := gob.NewDecoder(bytes.NewReader(entry.GetCommand())).Decode(&nodes); err != nil {
 				logger.Println("decode Cold,new config err: ", err.Error())
 			}
-			s.config.setState(c_old_new)
-			s.config.c_NewNode = make(nodeMap)
+			s.config.setState(cOldNew)
+			s.config.cNewNode = make(nodeMap)
 			for _, node := range nodes {
-				s.config.c_NewNode[node.id()] = node
+				s.config.cNewNode[node.id()] = node
 			}
 		} else if entry.GetCommandName() == cNewStr {
 			nodes := []Node{}
 			if err := gob.NewDecoder(bytes.NewReader(entry.GetCommand())).Decode(&nodes); err != nil {
 				logger.Println("decode Cnew config err: ", err.Error())
 			}
-			s.config.setState(c_old)
-			s.config.c_OldNode = makeNodeMap(nodes...)
-			s.config.c_NewNode = nil
+			s.config.setState(cOld)
+			s.config.cOldNode = makeNodeMap(nodes...)
+			s.config.cNewNode = nil
 		}
 		log.entries = append(log.entries, entry)
 	}
