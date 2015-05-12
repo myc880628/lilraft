@@ -47,11 +47,11 @@ func TestNewServer(t *testing.T) {
 		NewHTTPNode(2, "http://127.0.0.1:8788"),
 		NewHTTPNode(3, "http://127.0.0.1:8789"),
 	)
-	s1 = NewServer(1, &testArray1, config, "s1/")
+	s1 = NewServer(1, &testArray1, config, "s1/", false)
 	time.Sleep(50 * time.Millisecond)
-	s2 = NewServer(2, &testArray2, config, "s2/")
+	s2 = NewServer(2, &testArray2, config, "s2/", false)
 	time.Sleep(50 * time.Millisecond)
-	s3 = NewServer(3, &testArray3, config, "s3/")
+	s3 = NewServer(3, &testArray3, config, "s3/", false)
 	servers[s1.id] = s1
 	servers[s2.id] = s2
 	servers[s3.id] = s3
@@ -140,9 +140,9 @@ func TestChangeConfig(t *testing.T) {
 		NewHTTPNode(5, "http://127.0.0.1:8791"),
 	)
 
-	s4 = NewServer(4, &testArray4, config, "s4/")
+	s4 = NewServer(4, &testArray4, config, "s4/", false)
 	time.Sleep(50 * time.Millisecond)
-	s5 = NewServer(5, &testArray5, config, "s5/")
+	s5 = NewServer(5, &testArray5, config, "s5/", false)
 
 	servers[4] = s4
 	servers[5] = s5
@@ -210,7 +210,7 @@ func TestServerRecover(t *testing.T) {
 	}
 
 	for id, server := range servers {
-		server = NewServer(id, &testArray[id], config, fmt.Sprintf("s%d/", id))
+		server = NewServer(id, &testArray[id], config, fmt.Sprintf("s%d/", id), true)
 		server.Start()
 	}
 

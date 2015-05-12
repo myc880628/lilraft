@@ -219,7 +219,7 @@ func (log *Log) contains(index int64, term int64) bool {
 	return false
 }
 
-func (log *Log) recover(logPath string, context interface{}) (err error) {
+func (log *Log) recover(logPath string, context interface{}, recoverContex bool) (err error) {
 	log.file, err = os.OpenFile(logPath, os.O_RDWR, 0700)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -241,14 +241,16 @@ func (log *Log) recover(logPath string, context interface{}) (err error) {
 		}
 		if entry.GetIndex() > log.startIndex() {
 			log.entries = append(log.entries, entry)
-			command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
-			if err != nil {
-				continue
+			if recoverContex {
+				command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
+				if err != nil {
+					continue
+				}
+				if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
+					continue
+				}
+				command.Apply(context)
 			}
-			if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
-				continue
-			}
-			command.Apply(context)
 		}
 	}
 	return nil

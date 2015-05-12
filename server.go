@@ -202,7 +202,7 @@ func (s *Server) SetConfig(nodes ...Node) error {
 }
 
 // NewServer can return a new server for clients
-func NewServer(id int32, context interface{}, config *configuration, path string) (s *Server) {
+func NewServer(id int32, context interface{}, config *configuration, path string, recoverContex bool) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
@@ -237,7 +237,7 @@ func NewServer(id int32, context interface{}, config *configuration, path string
 	if err != nil && !os.IsExist(err) {
 		panic(err.Error())
 	}
-	if err := s.log.recover(s.logPath(), s.context); err != nil {
+	if err := s.log.recover(s.logPath(), s.context, recoverContex); err != nil {
 		logger.Println("server recover", s.logPath(), "error: ", err.Error())
 	}
 	return
