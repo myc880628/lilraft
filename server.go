@@ -202,7 +202,7 @@ func (s *Server) SetConfig(nodes ...Node) error {
 }
 
 // NewServer can return a new server for clients
-func NewServer(id int32, context interface{}, config *configuration, path string, recoverContex bool) (s *Server) {
+func NewServer(id int32, context interface{}, config *configuration, path string) (s *Server) {
 	if context == nil {
 		panic("lilraft: contex is required")
 	}
@@ -237,14 +237,14 @@ func NewServer(id int32, context interface{}, config *configuration, path string
 	if err != nil && !os.IsExist(err) {
 		panic(err.Error())
 	}
-	if err := s.log.recover(s.logPath(), s.context, recoverContex); err != nil {
-		logger.Println("server recover", s.logPath(), "error: ", err.Error())
-	}
 	return
 }
 
 // Start starts a server, remember to call NewServer before call this.
-func (s *Server) Start() {
+func (s *Server) Start(recoverContex bool) {
+	if err := s.log.recover(s.logPath(), s.context, recoverContex); err != nil {
+		logger.Println("server recover", s.logPath(), "error: ", err.Error())
+	}
 	s.setState(follower) // all servers start as follower
 	go s.loop()
 }
@@ -252,6 +252,7 @@ func (s *Server) Start() {
 // Stop stops a server by setting server's state(a integer) to stopped
 func (s *Server) Stop() {
 	s.setState(stopped)
+	s.log.close()
 }
 
 func (s *Server) loop() {
@@ -324,7 +325,7 @@ func (s *Server) candidateloop() {
 	s.updateCurrentTerm(s.currentTerm + 1) // enter candidate state. Server increments its term
 	s.resetElectionTimeout()
 	s.requestVotes()
-	s.voteForItself()
+	go s.voteForItself()
 	for s.getState() == candidate {
 		select {
 		case <-s.electionTimeout.C:
@@ -481,6 +482,7 @@ func (s *Server) sendAppendEntries() error {
 	newNode := s.config.cNewNode
 	successChan := make(chan int32, len(theOtherNodes))
 	errChan := make(chan error, len(theOtherNodes))
+	go func() { successChan <- s.id }()
 	for id, node := range theOtherNodes {
 		go func(id int32, node Node) {
 			for {
@@ -506,11 +508,8 @@ func (s *Server) sendAppendEntries() error {
 			}
 		}(id, node)
 	}
-	oldSuccessCount := 1
-	newSuccessCount := 1
-	if newNode != nil && newNode[s.id] == nil {
-		newSuccessCount = 0
-	}
+	oldSuccessCount := 0
+	newSuccessCount := 0
 	go func() {
 		acceptCount := 0
 		for {
@@ -523,11 +522,17 @@ func (s *Server) sendAppendEntries() error {
 				if newNode[id] != nil {
 					newSuccessCount++
 				}
-				if oldSuccessCount >= len(oldNode)/2+1 && newSuccessCount >= len(newNode)/2+1 {
+				if oldSuccessCount >= len(oldNode)/2+1 {
 					// PAPER: Agreement(for elections and entry commitment)requires
 					// separate majorities from both the old and new
 					// configurations.
-					errChan <- nil
+					if s.config.getState() == cOldNew {
+						if newSuccessCount >= len(newNode)/2+1 {
+							errChan <- nil
+						}
+					} else {
+						errChan <- nil
+					}
 				}
 				if acceptCount >= len(theOtherNodes) {
 					return // all nodes have accept request
@@ -607,8 +612,13 @@ func (s *Server) handleVoteRequest(voteRequest *RequestVoteRequest) *RequestVote
 }
 
 func (s *Server) voteForItself() {
-	s.voted = true
-	s.nodesVoteGranted[s.id] = true
+	responseProto := &RequestVoteResponse{
+		VoteGranted: proto.Bool(true),
+	}
+	s.getVoteResponseChan <- wrappedVoteResponse{
+		id:                  s.id,
+		RequestVoteResponse: responseProto,
+	}
 }
 
 func (s *Server) requestVotes() {

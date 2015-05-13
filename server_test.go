@@ -47,11 +47,11 @@ func TestNewServer(t *testing.T) {
 		NewHTTPNode(2, "http://127.0.0.1:8788"),
 		NewHTTPNode(3, "http://127.0.0.1:8789"),
 	)
-	s1 = NewServer(1, &testArray1, config, "s1/", false)
+	s1 = NewServer(1, &testArray1, config, "s1/")
 	time.Sleep(50 * time.Millisecond)
-	s2 = NewServer(2, &testArray2, config, "s2/", false)
+	s2 = NewServer(2, &testArray2, config, "s2/")
 	time.Sleep(50 * time.Millisecond)
-	s3 = NewServer(3, &testArray3, config, "s3/", false)
+	s3 = NewServer(3, &testArray3, config, "s3/")
 	servers[s1.id] = s1
 	servers[s2.id] = s2
 	servers[s3.id] = s3
@@ -66,9 +66,9 @@ func TestStartServer(t *testing.T) {
 	s2.SetHTTPTransport(http.NewServeMux(), ports[1])
 	s3.SetHTTPTransport(http.NewServeMux(), ports[2])
 
-	s1.Start()
-	s2.Start()
-	s3.Start()
+	s1.Start(false)
+	s2.Start(false)
+	s3.Start(false)
 
 	time.Sleep(1 * time.Second)
 }
@@ -122,7 +122,7 @@ func TestLeaderCrash(t *testing.T) {
 
 func TestOldLeaderReconnect(t *testing.T) {
 	oldLeaderServer := servers[oldleader]
-	oldLeaderServer.Start()
+	oldLeaderServer.Start(false)
 	oldLeaderServer.setState(leader)
 	logger.Printf("old leader %d reconnected", oldLeaderServer.id)
 	time.Sleep(500 * time.Millisecond)
@@ -140,9 +140,9 @@ func TestChangeConfig(t *testing.T) {
 		NewHTTPNode(5, "http://127.0.0.1:8791"),
 	)
 
-	s4 = NewServer(4, &testArray4, config, "s4/", false)
+	s4 = NewServer(4, &testArray4, config, "s4/")
 	time.Sleep(50 * time.Millisecond)
-	s5 = NewServer(5, &testArray5, config, "s5/", false)
+	s5 = NewServer(5, &testArray5, config, "s5/")
 
 	servers[4] = s4
 	servers[5] = s5
@@ -150,8 +150,8 @@ func TestChangeConfig(t *testing.T) {
 	s4.SetHTTPTransport(http.NewServeMux(), ports[3])
 	s5.SetHTTPTransport(http.NewServeMux(), ports[4])
 
-	s4.Start()
-	s5.Start()
+	s4.Start(false)
+	s5.Start(false)
 
 	err := s3.SetConfig(
 		NewHTTPNode(1, "http://127.0.0.1:8787"),
@@ -210,15 +210,15 @@ func TestServerRecover(t *testing.T) {
 	}
 
 	for id, server := range servers {
-		server = NewServer(id, &testArray[id], config, fmt.Sprintf("s%d/", id), true)
-		server.Start()
+		server = NewServer(id, &testArray[id], config, fmt.Sprintf("s%d/", id))
+		server.Start(true)
 	}
 
 	time.Sleep(80 * time.Millisecond)
 
 	for id := range servers {
 		if testArray[id][1] != 1997 {
-			t.Errorf("value should be in s1 context")
+			t.Errorf("value should be in s%d context", id)
 		}
 		if err := os.RemoveAll(fmt.Sprintf("s%d", id)); err != nil {
 			logger.Println(err.Error())

@@ -231,6 +231,7 @@ func (log *Log) recover(logPath string, context interface{}, recoverContex bool)
 			return err
 		}
 	}
+	println(log.file.Name())
 	for {
 		entry := &LogEntry{}
 		if err = Decode(log.file, entry); err != nil {
@@ -244,6 +245,7 @@ func (log *Log) recover(logPath string, context interface{}, recoverContex bool)
 			if recoverContex {
 				command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
 				if err != nil {
+					println(err.Error())
 					continue
 				}
 				if entry.GetCommandName() == cOldNewStr || entry.GetCommandName() == cNewStr {
@@ -254,4 +256,11 @@ func (log *Log) recover(logPath string, context interface{}, recoverContex bool)
 		}
 	}
 	return nil
+}
+
+func (log *Log) close() {
+	if log.file != nil {
+		log.file.Close()
+		log.file = nil
+	}
 }
