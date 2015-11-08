@@ -1,6 +1,7 @@
 package lilraft
 
 import (
+	"bytes"
 	"encoding/gob"
 	"fmt"
 	"net/http"
@@ -13,6 +14,10 @@ const (
 	commandPath       = "/lilraft/command"
 	setConfigPath     = "/lilraft/setconfig"
 )
+
+func init() {
+	gob.Register(RetValErr{})
+}
 
 // SetHTTPTransport accept a http multiplexer to handle other peers'
 // RPCs like RequestVote and AppendEntry, etc.
@@ -79,6 +84,11 @@ func requestVoteHandler(s *Server) http.HandlerFunc {
 	}
 }
 
+type RetValErr struct {
+	Val interface{}
+	Err error
+}
+
 // TODO: fill this func
 func commandHandler(s *Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -97,11 +107,16 @@ func commandHandler(s *Server) http.HandlerFunc {
 			return
 		}
 
-		if err := s.Exec(command); err != nil {
-			w.Write([]byte("failed"))
-			return
-		}
-		w.Write([]byte("success"))
+		val, err := s.Exec(command)
+		var bytesBuffer bytes.Buffer
+		// var retValErr RetValErr
+		gob.NewEncoder(&bytesBuffer).Encode(RetValErr{
+			Val: val,
+			Err: err,
+		})
+		b := bytesBuffer.Bytes()
+		println("send bytes back: ", b)
+		w.Write(b)
 	}
 }
 

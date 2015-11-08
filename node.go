@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 
 	"github.com/golang/protobuf/proto"
@@ -15,8 +16,8 @@ type Node interface {
 	id() int32
 	rpcAppendEntries(*Server, *AppendEntriesRequest) (*AppendEntriesResponse, error)
 	rpcRequestVote(*Server, *RequestVoteRequest) (*RequestVoteResponse, error)
-	rpcCommand(*Server, *RedirectedCommand) error // followers use this to redirect client's commands to leader
-	rpcSetConfig(*Server, []Node) error           // followers use this to redirect client's new configuration
+	rpcCommand(*Server, *RedirectedCommand) (interface{}, error) // followers use this to redirect client's commands to leader
+	rpcSetConfig(*Server, []Node) error                          // followers use this to redirect client's new configuration
 }
 
 // nodeMap wraps some useful function with a map
@@ -101,24 +102,30 @@ type httpCommand struct {
 	command Command
 }
 
-func (node *HTTPNode) rpcCommand(server *Server, rCommand *RedirectedCommand) error {
+func (node *HTTPNode) rpcCommand(server *Server, rCommand *RedirectedCommand) (interface{}, error) {
 	var bytesBuffer bytes.Buffer
 	if err := Encode(&bytesBuffer, rCommand); err != nil {
-		return err
+		return nil, err
 	}
 	url := fmt.Sprintf("%s%s", node.URL, commandPath)
 	httpResponse, err := server.httpClient.Post(url, "application/protobuf", &bytesBuffer)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var resp []byte
-	if _, err := httpResponse.Body.Read(resp); err != nil {
-		return err
-	}
-	if string(resp) == "failed" {
-		return fmt.Errorf("node %d exec command failed", node.id())
-	}
-	return nil
+	// var resp []byte
+	// if _, err := httpResponse.Body.Read(resp); err != nil {
+	// 	return nil, err
+	// }
+	// if string(resp) == "failed" {
+	// 	return nil, fmt.Errorf("node %d exec command failed", node.id())
+	// }
+	// return nil
+
+	resp, _ := ioutil.ReadAll(httpResponse.Body)
+	println("get response : ", resp)
+	var retValErr RetValErr
+	gob.NewDecoder(bytes.NewReader(resp)).Decode(&retValErr)
+	return retValErr.Val, retValErr.Err
 }
 
 // TODO: this needs to be refactor

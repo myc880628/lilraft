@@ -36,14 +36,16 @@ func (s *Server) logPath() string {
 }
 
 // TODO: add more procedure
-func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
+func (log *Log) setCommitIndex(commitIndex int64, context interface{}) (interface{}, error) {
 	log.Lock()
 	defer log.Unlock()
 	startIndex := log.startIndex()
 	if startIndex < 0 {
-		return fmt.Errorf("set commit index on empty log")
+		return nil, fmt.Errorf("set commit index on empty log")
 	}
 	w := bufio.NewWriter(log.file)
+	var val interface{}
+	var retErr error
 	for i := log.commitIndex + 1; i <= commitIndex; i++ {
 		entryIndex := i - startIndex
 		entry := log.entries[entryIndex]
@@ -53,16 +55,21 @@ func (log *Log) setCommitIndex(commitIndex int64, context interface{}) error {
 		}
 		command, err := newCommand(entry.GetCommandName(), entry.GetCommand())
 		if err != nil {
-			return err
+			return nil, err
 		}
-		command.Apply(context)
+		if i != commitIndex {
+			command.Apply(context)
+		} else {
+			println("the command name: ", command.Name())
+			val, retErr = command.Apply(context)
+		}
 	}
 	w.Flush()
 	go func() {
 		log.file.Sync()
 	}()
 	log.commitIndex = commitIndex
-	return nil
+	return val, retErr
 }
 
 // first index in log entries

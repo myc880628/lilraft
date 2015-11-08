@@ -145,6 +145,7 @@ type wrappedVoteResponse struct {
 type wrappedCommand struct {
 	command Command
 	errChan chan error
+	valChan chan interface{}
 }
 
 type wrappedAppendRequest struct {
@@ -169,14 +170,17 @@ func (s *Server) resetElectionTimeout() {
 // Exec executes client's command. client should
 // use concrete and registered commands that
 // implement Command interface
-func (s *Server) Exec(command Command) error {
+func (s *Server) Exec(command Command) (interface{}, error) {
 	errChan := make(chan error)
-	logger.Println(command)
+	valChan := make(chan interface{})
 	s.commandChan <- wrappedCommand{
 		errChan: errChan,
 		command: command,
+		valChan: valChan,
 	}
-	return <-errChan
+	retErr := <-errChan
+	retVal := <-valChan
+	return retVal, retErr
 }
 
 // RegisterCommand registers client's commands that
@@ -287,21 +291,23 @@ func (s *Server) followerloop() {
 			appendRequest := wrappedAppendRequest.request
 			wrappedAppendRequest.responseChan <- s.handleAppendEntriesRequest(appendRequest)
 		case wrappedCommand := <-s.commandChan:
-			wrappedCommand.errChan <- s.redirectClientCommand(wrappedCommand.command)
+			val, err := s.redirectClientCommand(wrappedCommand.command)
+			wrappedCommand.errChan <- err
+			wrappedCommand.valChan <- val
 		case wrappedSetConfig := <-s.getConfigChan:
 			wrappedSetConfig.errChan <- s.redirectClientConfig(wrappedSetConfig.nodes)
 		}
 	}
 }
 
-func (s *Server) redirectClientCommand(command Command) error {
+func (s *Server) redirectClientCommand(command Command) (interface{}, error) {
 	if s.leader == noleader {
-		return errNoLeader
+		return nil, errNoLeader
 	}
 	logger.Printf("node %d redirecting client to node %d", s.id, s.leader)
 	var bytesBuffer bytes.Buffer
 	if err := json.NewEncoder(&bytesBuffer).Encode(command); err != nil {
-		return err
+		return nil, err
 	}
 	redirectedCommand := &RedirectedCommand{
 		CommandName: proto.String(command.Name()),
@@ -378,6 +384,7 @@ func (s *Server) candidateloop() {
 			}
 		case wrappedCommand := <-s.commandChan:
 			wrappedCommand.errChan <- fmt.Errorf("leader doesn't exist")
+			wrappedCommand.valChan <- nil
 		case wrappedSetConfig := <-s.getConfigChan:
 			wrappedSetConfig.errChan <- fmt.Errorf("leader doesn't exist")
 		}
@@ -415,7 +422,9 @@ func (s *Server) leaderloop() {
 				wrappedCommand.errChan <- err
 				continue
 			}
-			wrappedCommand.errChan <- s.log.setCommitIndex(s.log.lastLogIndex(), s.context)
+			val, err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context)
+			wrappedCommand.errChan <- err
+			wrappedCommand.valChan <- val
 		case wrappedSetConfig := <-s.getConfigChan:
 			go func() {
 				wrappedSetConfig.errChan <- s.processSetConfig(&wrappedSetConfig)
@@ -714,7 +723,7 @@ func (s *Server) processSetConfig(wrappedSetConfig *wrappedSetConfig) error {
 		logger.Println("append Coldnew config entries error: ", err.Error())
 		return err
 	}
-	if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+	if _, err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
 		return err
 	}
 	// now cOldNew has send to majorities of c_new and cOld and commit ColdNew
@@ -731,7 +740,7 @@ func (s *Server) processSetConfig(wrappedSetConfig *wrappedSetConfig) error {
 		logger.Println("append Cnew config entries error: ", err.Error())
 		return err
 	}
-	if err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
+	if _, err := s.log.setCommitIndex(s.log.lastLogIndex(), s.context); err != nil {
 		return err
 	}
 	// now c_new has been commited

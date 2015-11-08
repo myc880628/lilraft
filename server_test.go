@@ -61,6 +61,7 @@ func TestStartServer(t *testing.T) {
 	// s1, s2, s3 is on the same machine, so
 	// command just need to be registered once
 	s1.RegisterCommand(&testCommand{})
+	s1.RegisterCommand(&testCommand2{})
 
 	s1.SetHTTPTransport(http.NewServeMux(), ports[0])
 	s2.SetHTTPTransport(http.NewServeMux(), ports[1])
@@ -90,6 +91,17 @@ func TestExecCommand(t *testing.T) {
 	logger.Println(testArray1)
 	logger.Println(testArray2)
 	logger.Println(testArray3)
+}
+
+func TestGetValCommand(t *testing.T) {
+	iface, _ := s3.Exec(newTestCommand2())
+	val, yes := iface.(int)
+	if !yes {
+		t.Error("return wrong type")
+	}
+	if val != 2046 {
+		t.Error("get value should be 2046 but get ", val)
+	}
 }
 
 func TestLeaderCrash(t *testing.T) {

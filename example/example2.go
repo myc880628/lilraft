@@ -16,9 +16,10 @@ func (t *testCommand) Name() string {
 	return "test"
 }
 
-func (t *testCommand) Apply(context interface{}) {
+func (t *testCommand) Apply(context interface{}) (interface{}, error) {
 	sl := context.(*[]int)
 	*sl = append(*sl, t.Val)
+	return nil, nil
 }
 
 func newTestCommand(val int) *testCommand {
